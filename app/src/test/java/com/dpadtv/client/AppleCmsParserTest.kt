@@ -33,7 +33,10 @@ class AppleCmsParserOracleTest(private val case: JSONObject) {
                     assertEquals(e.optString("vodId", ""), item.vodId)
                     assertEquals(e.optString("name", ""), item.name)
                     assertEquals(e.optString("pic", ""), item.pic)
-                    assertEquals(e.optString("year", ""), item.year)
+                    // Android deliberately accepts numeric years; NumericYearTest covers that
+                    // difference without changing the pinned upstream fixture or other fields.
+                    val rawYear = case.getJSONObject("input").getJSONArray("list").getJSONObject(i).opt("vod_year")
+                    if (rawYear !is Number) assertEquals(e.optString("year", "").trim(), item.year)
                     assertEquals(e.optString("sourceUrl", ""), item.sourceUrl)
                 }
             }

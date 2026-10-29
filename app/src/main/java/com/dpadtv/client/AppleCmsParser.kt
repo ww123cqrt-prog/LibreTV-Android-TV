@@ -28,7 +28,7 @@ object AppleCmsParser {
         val items = (0 until list.length()).map { index ->
             val row = list.getJSONObject(index)
             val id = row.opt("vod_id").takeUnless { it === JSONObject.NULL }?.toString().orEmpty()
-            SearchItem(source.name, id, row.string("vod_name"), row.string("vod_pic"), row.string("type_name"), row.string("vod_year"), row.string("vod_remarks"), source.url)
+            SearchItem(source.name, id, row.string("vod_name"), row.string("vod_pic"), row.string("type_name"), row.year(), row.string("vod_remarks"), source.url)
         }
         val pageCount = data.opt("pagecount")?.toString()?.toDoubleOrNull()?.toInt() ?: 1
         return CmsPage(items, pageCount.coerceIn(1, 5))
@@ -55,7 +55,7 @@ object AppleCmsParser {
         return Detail(urls, VideoInfo(
             title = row.string("vod_name").trim(), cover = row.string("vod_pic").trim(),
             desc = row.string("vod_content").trim(), remarks = row.string("vod_remarks").trim(),
-            year = row.string("vod_year").trim(), area = row.string("vod_area").trim(), actor = row.string("vod_actor").trim(),
+            year = row.year(), area = row.string("vod_area").trim(), actor = row.string("vod_actor").trim(),
         ))
     }
 
@@ -120,4 +120,10 @@ object AppleCmsParser {
     }
 
     private fun JSONObject.string(key: String): String = opt(key) as? String ?: ""
+
+    private fun JSONObject.year(): String = when (val value = opt("vod_year")) {
+        is String -> value.trim()
+        is Number -> value.toString()
+        else -> ""
+    }
 }
