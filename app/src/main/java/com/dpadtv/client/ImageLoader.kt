@@ -20,7 +20,9 @@ class ImageLoader(private val api: Api) {
     private val cache = LruCache<String, Bitmap>(160)
     private val pool = Executors.newFixedThreadPool(3)
     private val main = Handler(Looper.getMainLooper())
+    private val inFlight = mutableMapOf<String, MutableList<(Bitmap?) -> Unit>>()
 
+    /** Called by UI bindings on the main thread. */
     fun load(url: String, reqWidth: Int, reqHeight: Int, onReady: (Bitmap?) -> Unit) {
         if (url.isEmpty()) {
             onReady(null)
@@ -31,10 +33,17 @@ class ImageLoader(private val api: Api) {
             onReady(it)
             return
         }
+        inFlight[key]?.let {
+            it.add(onReady)
+            return
+        }
+        inFlight[key] = mutableListOf(onReady)
         pool.execute {
             val bmp = download(url, reqWidth, reqHeight)
-            if (bmp != null) cache.put(key, bmp)
-            main.post { onReady(bmp) }
+            main.post {
+                if (bmp != null) cache.put(key, bmp)
+                inFlight.remove(key)?.forEach { it(bmp) }
+            }
         }
     }
 
