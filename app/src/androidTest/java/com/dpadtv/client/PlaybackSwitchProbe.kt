@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import org.json.JSONObject
+import java.io.IOException
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.SocketException
@@ -24,7 +25,7 @@ class PlaybackSwitchProbe(private val instrumentation: Instrumentation) {
                 val socket = try { server.accept() } catch (closed: SocketException) {
                     if (server.isClosed) break else throw closed
                 }
-                socket.use {
+                try { socket.use {
                     val reader = it.getInputStream().bufferedReader()
                     val request = reader.readLine().orEmpty()
                     while (!reader.readLine().isNullOrEmpty()) Unit
@@ -34,6 +35,8 @@ class PlaybackSwitchProbe(private val instrumentation: Instrumentation) {
                         write(body)
                         flush()
                     }
+                } } catch (_: IOException) {
+                    // Switching can cancel a previous media request before its response is sent.
                 }
             }
         }.apply { isDaemon = true; start() }
