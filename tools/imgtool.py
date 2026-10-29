@@ -1,9 +1,9 @@
 ﻿from PIL import Image, ImageFilter
 import os, json, sys
-outdir = r"D:\Develop\chat\dpadtv-native\docs"
+from pathlib import Path
+outdir = Path(__file__).resolve().parents[1] / "docs"
 
-def fix_alipay():
-    src = r"D:\33178\Desktop\Picsew_20261017193444.jpeg"
+def fix_alipay(src):
     im = Image.open(src).convert("RGB"); g = im.convert("L"); w,h = g.size; px = g.load()
     y0 = int(h*0.40)
     minx,miny,maxx,maxy = w,h,0,0
@@ -33,6 +33,6 @@ def blur_rects(png, rects):
     print("masked", os.path.basename(png), len(rects), "rects ->", im.size)
 
 if __name__ == "__main__":
-    if sys.argv[1] == "qr": fix_alipay()
+    if sys.argv[1] == "qr": fix_alipay(sys.argv[2])
     elif sys.argv[1] == "mask":
         png = sys.argv[2]; rects = json.loads(sys.argv[3]); blur_rects(png, rects)

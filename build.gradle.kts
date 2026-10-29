@@ -1,4 +1,4 @@
-// 与 WebView 版共用同一套已验证的工具链：AGP 9.3.0 / Gradle 9.5.0 / JDK 25。
+// 已验证工具链：AGP 9.3.0 / Gradle 9.8.2 / JDK 21。
 //
 // 注意：AGP 9 自带 Kotlin 支持，**不能再叠加 org.jetbrains.kotlin.android**，
 // 否则会报 "Failed to apply plugin 'org.jetbrains.kotlin.android'"。

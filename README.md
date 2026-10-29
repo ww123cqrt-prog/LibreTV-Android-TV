@@ -1,170 +1,102 @@
-# DpadTV
+# LibreTV · 投影仪 / Android TV
 
-[LibreTV](https://github.com/LibreSpark/LibreTV) 的 Android TV 客户端 —— 原生实现，不依赖 WebView。
+这是基于 **[DpadTV v1.2.0](https://github.com/AresCNZJ/DpadTV/tree/v1.2.0)** 和 **[LibreSpark/LibreTV v2.21.1](https://github.com/LibreSpark/LibreTV/tree/v2.21.1)** 开发的投影仪／Android TV 版本，已在坚果 N5 Pro 上测试。沿用 DpadTV 原生界面、遥控操作和 Media3 播放，将 LibreTV 的 Apple CMS 搜索、JSON 详情、推荐标签和同名合卡能力移到 Kotlin 客户端。运行时由设备直接访问接口和视频，无需 Windows、NAS、Node.js 或自建服务器。
 
-对接你自建的 LibreTV 服务端，在电视上用遥控器浏览、搜索、播放。
+This is a projector / Android TV adaptation based on DpadTV and LibreSpark/LibreTV. It retains native remote navigation and Media3 playback, with Kotlin clients for catalogue and recommendation requests. This is a community adaptation, not an official release of either upstream project.
 
-> 非官方项目，与 LibreTV 作者无隶属关系。
+应用名称为 **LibreTV**，仓库名为 **LibreTV-Android-TV**。本项目是社区适配版本，与两个上游项目没有官方发布关系。开发来源、固定提交和修改说明见 [NOTICE.md](NOTICE.md)。
 
-## 功能
+当前版本为 0.1.6，显示名称为 LibreTV，延续本适配版包名和开发签名。电影、剧集各有 10 个推荐标签；搜索结果按片名和年份合卡，详情页和播放器均可换源。目标是无需电脑的日常影视点播：推荐、全源搜索、选集、遥控播放和续播。直播、应用内更新等扩展功能已取消，不作为交付要求。
 
-**浏览与搜索**
+## 安装与使用
 
-- **首页**：豆瓣排行榜海报网格，电影 / 剧集 / 综艺三个分类，滚动到底自动加载下一批
-- **热门搜索**：搜索页展示三类榜单前 10 名，点一下直接搜
-- **搜索**：多源聚合，按片名分组显示来源数，可按来源筛选，记住搜索历史
-- **详情**：封面、简介、集数、多来源切换（当前源标 ●）
+从 [Releases](https://github.com/ww123cqrt-prog/LibreTV-Android-TV/releases) 下载 APK。当前为 0.1.6 / versionCode 7 的调试预发布包，沿用已有开发签名。Android 最低要求为 6.0 / API 23，已测设备为坚果 N5 Pro（Android 14 / API 34，ARM64）；其他设备尚未逐一验收。
 
-**片源管理**
+包名为 `local.libretv.standalone.tv`，与原版 `com.dpadtv.client` 并存，配置、历史和缓存分开保存。首次运行从 APK 内置文件载入 9 个可编辑的公开接口地址，以后不会覆盖手动修改；不读取其他应用的配置。这些第三方地址的可用性不由本项目保证，也不包含用户账号或登录凭据。
 
-- **六种导入方式**：**手机扫码**（可上传文件）/ 粘贴文本 / 设备文件 / 从网址导入 / 手动添加 / 服务器配置
-- **单行状态列表**：启用状态、完整地址、连通性结果一目了然
-- **全部测试**：一键并发检测所有源，结果持久保存，失效源标红
-- **逐条管理**：启用停用（长按一步切换）、改名称地址、上下移动、测试、删除
-- **首页按钮可排序、可隐藏**（设置 → 首页按钮排序）
+1. 安装对应 APK，在投影仪桌面打开 `LibreTV`。
+2. 首页可切换电影、剧集、综艺。电影与剧集下有一排分类标签：左右移动、OK 选择，上下在主导航、分类和海报之间移动。点击海报会按片名搜索全部启用片源，返回首页保留当前分类；也可点“搜索”自己输入片名。
+3. 全部已启用来源一起搜索，快来源先显示，慢来源继续补充。同名影片合成一张卡，同名翻拍按年份分开；卡片显示资源数和来源。点卡片默认打开第一条已返回资源的集数，详情页来源按钮可切换，返回会回到原卡片；无需先选来源。
+4. 播放时 OK 暂停或继续，左右快退或快进，下键打开操作栏，上键调整倍速，返回键退出播放。操作栏首项是“换源”：搜索结束后并行验证详情，先验证完成的来源先出现，其余继续补充。选定后保留集数、时间和播放／暂停状态；缺少当前集则保留原播放，切换时首帧失败或等待超过 15 秒则尝试恢复原来源。
+5. “继续观看”读取本应用的历史和进度。“片源”提供添加、停用和测试；菜单键进入本地设置。
 
-**播放**
+片源仍需要互联网。封面、目录与视频分别请求各自的外部地址。App 不使用 `127.0.0.1:18080`，不需要 ADB reverse。
 
-- ExoPlayer（Media3）内核，HLS 直连
-- **续播**：按播放地址记位置，播过 5 秒起生效，阈值可调
-- **自动连播**：整季作为播放列表，一集放完自动进下一集（可关）
-- **倍速**：X0.50 ~ X2.00，记住上次选择
-- **实时网速**：缓冲时在「缓冲中…」下方显示实际速率
-- **进度条三段色**：灰色未缓冲 / 白色已缓冲 / 蓝色已播放
-- **磁盘缓存**：分片落盘（默认上限 2 GB，可调 512 MB / 1 GB / 2 GB / 4 GB），回拖与重看不再重复下载
-- **解码兜底**：硬解失败自动尝试下一个解码器；也可手动强制软解
-- **显示比例**：适应 / 裁切 / 拉伸
+也可通过已经连接的 ADB 安装，将示例中的设备序列号替换为 `adb devices` 列出的实际值。无线端口以当前设备状态为准：
 
-**其它**
-
-- **直播**：M3U 多源、按分组筛选
-- **继续观看**：本地观看历史（封面 + 进度），缺封面时自动按片名补齐
-- **清理缓存**：图片 / 历史 / 搜索记录 / 播放进度 / 磁盘缓存，一次清完
-- **更新检测**：启动时检查 GitHub Releases（6 小时内不重复请求）
-  - 有新版本时**首页右上角出现胶囊**，按 OK 查看更新说明与下载二维码
-  - 设置页页脚同时标红点，可在设置里关闭首页提示
-  - 更新说明取自 Release 内容，无需打开浏览器
-
-## 截图
-
-### 首页
-
-![首页](docs/screenshot-home.png)
-
-### 详情
-
-![详情](docs/screenshot-detail.png)
-
-### 扫码添加片源
-
-![扫码](docs/screenshot-qr.png)
-
-## 遥控器操作
-
-**主界面**
-
-| 按键 | 操作 |
-|---|---|
-| 上下左右 | 移动焦点 |
-| OK | 进入 / 执行 |
-| 菜单键 | 打开设置 |
-
-**播放页**
-
-| 按键 | 操作 |
-|---|---|
-| OK | 暂停 / 播放 |
-| ← → | 快退 / 快进（短按 10 秒，按住 15 秒连发） |
-| ↑ | 倍速菜单 |
-| ↓ / 菜单键 | 呼出底部操作栏 |
-| 返回 | 退出播放 |
-
-**底部操作栏**：下集 · 上集 · 刷新 · 重播 · 倍速 · 解码 · 比例
-
-## 安装
-
-到 [Releases](../../releases) 下载 APK，拷到电视安装（需允许"未知来源"）。
-
-要求：Android 6.0+，任意 CPU 架构（包内没有原生库）。
-
-## 首次配置
-
-1. 填服务器地址与访问密码，点「连接并登录」
-2. 进「片源管理」添加采集站
-3. 回首页搜片名
-
-> 片源只支持 Apple CMS **JSON** 接口（`https://xxx/api.php/provide/vod`），`/at/xml/` 这类 XML 通道不支持。
-
-## 构建
-
-```bash
-# JDK 17+
-echo "sdk.dir=/path/to/android-sdk" > local.properties
-./gradlew :app:assembleDebug
+```powershell
+$serial = 'YOUR_DEVICE_SERIAL'
+adb -s $serial install -r '.\LibreTV-0.1.6.apk'
+adb -s $serial shell am start -W -n local.libretv.standalone.tv/com.dpadtv.client.MainActivity
 ```
 
-可选：把默认服务器地址 / 密码写进 `local.properties`（不入库），构建时注入：
+## 已验证与差异
 
-```properties
-dpadtv.defaultUrl=http://192.168.1.10:8899
-dpadtv.defaultPassword=your-password
+| 功能 | 当前状态 |
+| --- | --- |
+| Apple CMS 多源搜索、JSON 详情、播放列表 | 已移植；历史测试样本见性能报告，不将单次片源成功率作为当前可用性承诺 |
+| LibreTV 片名相关性、季度别名、线路选择 | 与固定 v2.21.1 原代码生成的 22 个样例对照通过 |
+| HTTP 到 HTTPS 跳转 | 已支持；360、极速片源实测通过 |
+| 遥控导航、原生 HLS 播放、快进 | 新包实机通过；沿用 DpadTV 播放器 |
+| 播放缓存、观看历史、续播 | 沿用；产生缓存，重启与同版本覆盖安装保留进度 |
+| 全源搜索、同名合卡 | 快结果逐页显示并追加；按精确片名、年份合并，详情页提供已返回资源切换，默认直接聚焦集数 |
+| 播放中换源 | 0.1.6 新增；沿用同一个播放器，查询时保持原播放；保留集数、断点及暂停状态，首帧失败回退 |
+| 文本、网址、文件及 LibreTV 设置导入 | 沿用 DpadTV 解析；尚未逐格式完成实机验收 |
+| HTML 详情、网页播放器解析、特殊源代理 | 未实现；没有直链时明确提示 |
+| 电影、剧集、综艺推荐及搜索热榜 | 已直连豆瓣；N5 每类48条，三类封面样本完整解码，海报墙显示通过 |
+| 上游电影、剧集推荐标签 | 0.1.4 新增各10个；N5 20个标签均返回48条，每类首张封面完整解码通过；详细范围见分类验收记录 |
+| 手机扫码导入的局域网 HTTP 服务 | 已停用，可用文本、文件或 URL 导入 |
+| 真正关闭 Windows、投影仪重启、断网恢复、长时间连续播放 | 待实机验收 |
+
+第三方片源可用性随网络和时间变化，实测细节和本轮检查结论见 `docs/performance-audit-2026-10-28.md`。
+
+0.1.4 分类范围见 [分类验收记录](docs/recommendation-tags-0.1.4.md)。0.1.5 的分组规则见 [合卡验收记录](docs/aggregate-search-0.1.5.md)。0.1.6 的操作和验证范围见 [播放换源验收记录](docs/player-source-switch-0.1.6.md)。来源列表中的响应时间测量详情接口，不代表视频带宽；不同来源的片头和剪辑可能不同，按秒续播不能保证画面完全对齐。
+
+搜索先显示已返回结果，其余来源继续补充；每次搜索调用的汇总预算约 12 秒，后续页面超时会保留成功页。关键词自动清洗后的重搜目前会再开启一次预算，因此单次界面操作可能更久。换源目前仍要等待初轮搜索结束才验证详情；这些等待及其他已知问题见 [四角度审查记录](docs/review-2026-10-30.md)。
+
+## 构建与复测
+
+构建环境为 JDK 21、AGP 9.3.0、Android SDK Platform 37。仓库 wrapper 固定为已验证的 Gradle 9.8.2，并配置官方发行包 SHA-256；初次使用需联网下载 Gradle 和依赖。以下命令使用 Windows PowerShell 7，`java` 和 `keytool` 应来自 JDK 21。先设置 `ANDROID_HOME` 为自己的 SDK 目录，或在未跟踪的 `local.properties` 中填写 `sdk.dir`。
+
+```powershell
+git clone https://github.com/ww123cqrt-prog/LibreTV-Android-TV.git
+Set-Location LibreTV-Android-TV
+pwsh -File .\tools\Initialize-Signing.ps1
+# 首次创建本地签名；今后必须保留原来的 .signing 目录。
+.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest --console=plain
 ```
 
-发布包（页脚不带"测试版"字样）：
+APK 输出为 `app/build/outputs/apk/debug/app-debug.apk`。macOS／Linux 可用 `./gradlew`，签名初始化脚本同样需要 PowerShell 7；这些平台未在本轮验证。
 
-```bash
-./gradlew :app:assembleDebug -Pdpadtv.release=true
+Node.js 只用于可选的对照样例再生成：`node ./tools/create-libretv-oracle.mjs`。固定样例已随仓库提供，普通编译和运行不需要 Node.js。再生成需要支持 TypeScript 类型擦除的 Node.js，已有样例使用 v24.11.1 生成。
+
+设备测试 APK 只用于开发验证，主 APK 无测试入口。测试设备须先安装本次使用同一 `.signing` 构建的主 APK；自行生成的签名不能用于测试 Releases 签名的主 APK。以下命令仅在已安装本次同签名主 APK 的测试设备上执行：
+
+```powershell
+adb -s $serial install -r '.\app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk'
+adb -s $serial shell am instrument -w -r -e query 三体 local.libretv.standalone.tv.test/com.dpadtv.client.NativeCmsInstrumentation
 ```
 
-## 自测（不需要真机）
+推荐与封面的额外实机复测：
 
-```bash
-node tools/e2e-api.mjs --url http://你的NAS:8899 --password 你的密码
+```powershell
+adb -s $serial shell am instrument -w -r -e mode recommend local.libretv.standalone.tv.test/com.dpadtv.client.NativeCmsInstrumentation
 ```
 
-复现客户端的调用序列（登录 → 搜索 → 详情 → 播放地址），并**真的拉取 m3u8** 验证地址可播。
+播放换源的受控复测使用测试 APK 内自行生成的 12 秒短片。测试临时 HTTP 服务只绑定设备的 `127.0.0.1`，结束后关闭，不依赖电脑服务。生产 APK 不包含短片或测试入口。
 
-## 已知限制
+```powershell
+adb -s $serial shell am instrument -w -r -e mode switch-player local.libretv.standalone.tv.test/com.dpadtv.client.NativeCmsInstrumentation
+```
 
-- **H.265 片源**能否播取决于 SoC 硬解，不支持时会明确提示"解码失败"
-- 直播只支持 HLS / TS / 渐进式，**FLV 不支持**（ExoPlayer 没有 FLV 解封装器）
-- 直播 EPG 未实现
-- 观看历史 / 搜索历史都是**本机**的，多设备不同步
-- 不预加载下一集（磁盘缓存只缓存已看过的分片）
-- 音轨切换、字幕选择尚未做
-- 首页顶部按钮栏的左右键已限制在栏内（不会跑到海报区）
-- 系统精简掉文件选择器的设备上，「从设备文件选择」可能读不到文件，改用扫码或粘贴
+推荐列表直连 `movie.douban.com`，图片直连 `doubanio.com` 子域；只传公开的 User-Agent 和 Referer，不需要豆瓣登录，也不走电脑图片代理。
 
-## 支持作者
+测试调用生产 Kotlin API，报告每个源的分类错误、耗时、结果数、详情集数和前 2048 字节媒体列表请求。媒体列表 HTTP 200 不能代替真正解码播放；真实播放另见验收报告。当前 JVM 测试为 56/56，包含原有 50 项解析、网络、推荐和合卡检查，以及新增的历史片名／集数还原、年份匹配和解说／季名隔离检查。
 
-如果这个客户端帮你省了时间，可以请我喝杯咖啡 —— **不影响任何功能**。
+## 签名、源码与许可证
 
-| 微信 | 支付宝 |
-|---|---|
-| <img src="docs/donate-wechat.png" width="200"> | <img src="docs/donate-alipay.png" width="200"> |
+本地独立签名保存在 `.signing`，不进入 Git 或源码 ZIP。不要重新生成已用于安装的密钥，否则无法覆盖更新并保留现有数据。源码接收者首次初始化会生成自己的签名，不能直接更新此处交付的已签名 APK。
 
-## 免责声明
+DpadTV 部分保留 [GPL-3.0](LICENSE)；LibreTV 移植部分按 [AGPL-3.0-or-later](third_party/LibreTV/LICENSE) 及其原声明提供。组合发布保留两者要求，完整对应源码、固定参考代码、构建脚本及来源说明均在本仓库。[GPLv3 第 13 节](https://www.gnu.org/licenses/gpl-3.0.html#section13) 说明了与 AGPLv3 组合的条款；不要将本项目描述为全部仅有 GPL-3.0。
 
-本项目仅为**客户端**，不提供、不存储、不分发任何音视频内容。所有内容均来自用户自行配置的第三方接口。
-请自行确认内容来源的合法性，使用者需自行承担相应责任。
-
-## 名称与标识
-
-代码本身遵循 GPL-3.0，修改和再分发都没有附加条件。
-
-只请求一件事：二次发行时换掉应用名称、图标和包名（`com.dpadtv.client`），并注明是非官方版本。
-这样别人不会把改动过的版本误认成原版，对项目和你都更省事。
-
-> "DpadTV" 名称与图标本身不随 GPL-3.0 授权。
-
-## 许可
-
-[GNU General Public License v3.0](LICENSE)
-
-可以自由使用、修改、分发；但分发修改后的版本时必须同样以 GPL-3.0 开源，且不能使用本项目的名称与图标（见上方「名称与标识」）。
-
-## 致谢
-
-- [LibreTV](https://github.com/LibreSpark/LibreTV) —— 服务端与接口设计
-- [AndroidX Media3](https://github.com/androidx/media) —— 播放器
-- [ZXing](https://github.com/zxing/zxing) —— 二维码生成
+各依赖说明见 [THIRD-PARTY.md](THIRD-PARTY.md)。仓库保留上游作者和资源归属；本地签名密钥、个人设置、日志及播放历史备份不公开。

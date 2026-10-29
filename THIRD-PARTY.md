@@ -12,6 +12,6 @@
 
 Apache License 2.0 全文：https://www.apache.org/licenses/LICENSE-2.0
 
-本项目自身代码以 [GPL-3.0](LICENSE) 授权。
+DpadTV 原有代码保留 [GPL-3.0](LICENSE)；从 LibreTV 移植的解析等代码按 [AGPL-3.0-or-later](third_party/LibreTV/LICENSE) 及其原声明提供。完整来源和修改范围见 [NOTICE.md](NOTICE.md)。本组合构建不应被描述为仅有 GPL-3.0，分发时应同时保留两份许可证及完整对应源码。
 
-Apache-2.0 与 GPL-3.0 兼容（Apache-2.0 的专利条款可作为额外许可附加），因此依赖组合在许可上没有冲突。
+GPLv3 与 AGPLv3 的组合条款见 [GNU GPLv3 第 13 节](https://www.gnu.org/licenses/gpl-3.0.html#section13)。这些依赖的 Apache-2.0 声明仍应随发行保留。

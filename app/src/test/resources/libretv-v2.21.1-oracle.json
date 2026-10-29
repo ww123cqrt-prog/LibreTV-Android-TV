@@ -1,0 +1,313 @@
+{
+  "source": {
+    "key": "sample",
+    "name": "样本源",
+    "url": "https://cms.example/api.php/provide/vod"
+  },
+  "upstream": {
+    "version": "2.21.1",
+    "commit": "29cbeb3d37b4876f909a0354087a3531af0447f6"
+  },
+  "cases": [
+    {
+      "kind": "episodes",
+      "input": "",
+      "expected": []
+    },
+    {
+      "kind": "episodes",
+      "input": "第1集$https://cdn.test/1.m3u8#第2集$https://cdn.test/2.m3u8",
+      "expected": [
+        "https://cdn.test/1.m3u8",
+        "https://cdn.test/2.m3u8"
+      ]
+    },
+    {
+      "kind": "episodes",
+      "input": "正片$https://cdn.test/share/a$$$正片$https://cdn.test/a.m3u8?token=abc",
+      "expected": [
+        "https://cdn.test/a.m3u8?token=abc"
+      ]
+    },
+    {
+      "kind": "episodes",
+      "input": "$$$正片$https://cdn.test/a.m3u8",
+      "expected": [
+        "https://cdn.test/a.m3u8"
+      ]
+    },
+    {
+      "kind": "episodes",
+      "input": "正片$https://cdn.test/a.mp4$$$备用$https://cdn.test/b.mp4",
+      "expected": [
+        "https://cdn.test/a.mp4"
+      ]
+    },
+    {
+      "kind": "episodes",
+      "input": "无链接#错误$javascript:bad#本地$file:///bad#正片$https://cdn.test/ok.m3u8",
+      "expected": [
+        "https://cdn.test/ok.m3u8"
+      ]
+    },
+    {
+      "kind": "relevance",
+      "query": "三体",
+      "titles": [
+        "三体",
+        "三体 动画版",
+        "体育新闻",
+        ""
+      ],
+      "expected": [
+        "三体",
+        "三体 动画版"
+      ]
+    },
+    {
+      "kind": "relevance",
+      "query": "摔跤吧！爸爸",
+      "titles": [
+        "摔跤吧!爸爸",
+        "爸爸去哪儿",
+        "爸爸",
+        ""
+      ],
+      "expected": [
+        "摔跤吧!爸爸"
+      ]
+    },
+    {
+      "kind": "relevance",
+      "query": "钢铁侠 2008",
+      "titles": [
+        "钢铁侠 2008",
+        "2008钢铁侠",
+        "钢铁侠 2009"
+      ],
+      "expected": [
+        "钢铁侠 2008",
+        "2008钢铁侠"
+      ]
+    },
+    {
+      "kind": "relevance",
+      "query": "庆余年2",
+      "titles": [
+        "庆余年 第二季",
+        "庆余年 第二季粤语",
+        "庆余年 第十二季",
+        "庆余年 第一季"
+      ],
+      "expected": [
+        "庆余年 第二季",
+        "庆余年 第二季粤语"
+      ]
+    },
+    {
+      "kind": "relevance",
+      "query": "庆余年 第二季",
+      "titles": [
+        "庆余年 2",
+        "庆余年 第十二季",
+        "庆余年 第二季【解说】"
+      ],
+      "expected": [
+        "庆余年 2",
+        "庆余年 第二季【解说】"
+      ]
+    },
+    {
+      "kind": "relevance",
+      "query": "电影2",
+      "titles": [
+        "电影2",
+        "电影12",
+        "电影20"
+      ],
+      "expected": [
+        "电影2"
+      ]
+    },
+    {
+      "kind": "relevance",
+      "query": "片名 2",
+      "titles": [
+        "片名 2",
+        "片名 12",
+        "片名 第二季",
+        "片名2"
+      ],
+      "expected": [
+        "片名 2",
+        "片名 第二季",
+        "片名2"
+      ]
+    },
+    {
+      "kind": "relevance",
+      "query": "ABC",
+      "titles": [
+        "abc",
+        "A.B.C",
+        "xyz"
+      ],
+      "expected": [
+        "abc",
+        "A.B.C"
+      ]
+    },
+    {
+      "kind": "relevance",
+      "query": "",
+      "titles": [
+        "",
+        "任意片名"
+      ],
+      "expected": [
+        "",
+        "任意片名"
+      ]
+    },
+    {
+      "kind": "relevance",
+      "query": "不存在的片名",
+      "titles": [
+        "体育目录",
+        "默认推荐"
+      ],
+      "expected": []
+    },
+    {
+      "kind": "search",
+      "input": {
+        "list": [
+          {
+            "vod_id": 12,
+            "vod_name": "三体",
+            "vod_pic": "https://img.test/a.jpg",
+            "type_name": "国产剧",
+            "vod_year": "2023",
+            "vod_area": "中国",
+            "vod_remarks": "全30集"
+          }
+        ]
+      },
+      "expected": [
+        {
+          "sourceKey": "sample",
+          "sourceName": "样本源",
+          "vodId": "12",
+          "name": "三体",
+          "pic": "https://img.test/a.jpg",
+          "typeName": "国产剧",
+          "year": "2023",
+          "area": "中国",
+          "remarks": "全30集",
+          "sourceUrl": "https://cms.example/api.php/provide/vod"
+        }
+      ]
+    },
+    {
+      "kind": "search",
+      "input": {
+        "list": [
+          {
+            "vod_id": 0
+          },
+          {
+            "vod_id": null,
+            "vod_year": 2023
+          }
+        ]
+      },
+      "expected": [
+        {
+          "sourceKey": "sample",
+          "sourceName": "样本源",
+          "vodId": "0",
+          "name": "",
+          "sourceUrl": "https://cms.example/api.php/provide/vod"
+        },
+        {
+          "sourceKey": "sample",
+          "sourceName": "样本源",
+          "vodId": "",
+          "name": "",
+          "sourceUrl": "https://cms.example/api.php/provide/vod"
+        }
+      ]
+    },
+    {
+      "kind": "search",
+      "input": {
+        "list": null
+      },
+      "expected": []
+    },
+    {
+      "kind": "search",
+      "input": {},
+      "expected": []
+    },
+    {
+      "kind": "detail",
+      "input": {
+        "list": [
+          {
+            "vod_name": " 三体 ",
+            "vod_pic": "https://img.test/a.jpg",
+            "vod_content": "<p>简介</p>",
+            "vod_year": "2023",
+            "vod_area": "中国",
+            "vod_actor": "演员",
+            "vod_remarks": "全30集",
+            "vod_play_url": "第1集$https://cdn.test/1.m3u8#第2集$https://cdn.test/2.m3u8"
+          }
+        ]
+      },
+      "expected": {
+        "episodes": [
+          "https://cdn.test/1.m3u8",
+          "https://cdn.test/2.m3u8"
+        ],
+        "videoInfo": {
+          "title": "三体",
+          "cover": "https://img.test/a.jpg",
+          "desc": "<p>简介</p>",
+          "year": "2023",
+          "area": "中国",
+          "actor": "演员",
+          "remarks": "全30集",
+          "sourceKey": "sample",
+          "sourceName": "样本源",
+          "sourceUrl": "https://cms.example/api.php/provide/vod"
+        }
+      }
+    },
+    {
+      "kind": "detail",
+      "input": {
+        "list": [
+          {
+            "vod_name": "简介兜底",
+            "vod_content": "正片$https://cdn.test/fallback.m3u8",
+            "vod_play_url": ""
+          }
+        ]
+      },
+      "expected": {
+        "episodes": [
+          "https://cdn.test/fallback.m3u8"
+        ],
+        "videoInfo": {
+          "title": "简介兜底",
+          "desc": "正片$https://cdn.test/fallback.m3u8",
+          "sourceKey": "sample",
+          "sourceName": "样本源",
+          "sourceUrl": "https://cms.example/api.php/provide/vod"
+        }
+      }
+    }
+  ]
+}

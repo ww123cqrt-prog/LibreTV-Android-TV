@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "dpadtv-native"
+rootProject.name = "libretv-standalone-tv"
 include(":app")

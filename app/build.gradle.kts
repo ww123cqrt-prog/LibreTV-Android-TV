@@ -4,9 +4,8 @@ plugins {
     id("com.android.application")
 }
 
-// 本机私有默认值（local.properties 不入库）。开源仓库里不含任何真实地址或密码。
-val localProps = Properties().apply {
-    val f = rootProject.file("local.properties")
+val standaloneSigning = Properties().apply {
+    val f = rootProject.file(".signing/signing.properties")
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
@@ -17,16 +16,28 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.dpadtv.client"
+        applicationId = "local.libretv.standalone.tv"
         // 23 = Android 6.0：Media3 的下限之上，老盒子都能装
         minSdk = 23
         targetSdk = 37
-        versionCode = 102
-        versionName = "1.2.0"
+        versionCode = 7
+        versionName = "0.1.6"
+        testInstrumentationRunner = "com.dpadtv.client.NativeCmsInstrumentation"
+    }
+
+    signingConfigs {
+        create("standalone") {
+            storeFile = rootProject.file(".signing/standalone.p12")
+            storePassword = standaloneSigning.getProperty("storePassword")
+            keyAlias = "standalone"
+            keyPassword = standaloneSigning.getProperty("storePassword")
+        }
     }
 
     buildTypes {
+        debug { signingConfig = signingConfigs.getByName("standalone") }
         release {
+            signingConfig = signingConfigs.getByName("standalone")
             optimization {
                 enable = false
             }
@@ -52,8 +63,9 @@ android {
     }
 
     defaultConfig {
-        buildConfigField("String", "DEFAULT_URL", "\"${localProps.getProperty("dpadtv.defaultUrl") ?: ""}\"")
-        buildConfigField("String", "DEFAULT_PASSWORD", "\"${localProps.getProperty("dpadtv.defaultPassword") ?: ""}\"")
+        // Retained only for unreachable upstream setup UI; standalone has no server credentials.
+        buildConfigField("String", "DEFAULT_URL", "\"\"")
+        buildConfigField("String", "DEFAULT_PASSWORD", "\"\"")
     }
 
     lint {
@@ -63,6 +75,8 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     // 原生播放：ExoPlayer 对 HLS 的容错远好于 MediaPlayer，H.265 取决于 SoC 硬解
     implementation("androidx.media3:media3-exoplayer:1.5.1")

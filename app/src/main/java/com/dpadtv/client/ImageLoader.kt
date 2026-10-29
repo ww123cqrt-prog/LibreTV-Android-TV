@@ -11,7 +11,7 @@ import java.util.concurrent.Executors
  * 极简海报图加载器（不引 Coil/Glide）。
  *
  * 三件事必须做对，否则电视盒子上会立刻出问题：
- *   1. 走站点的 /api/proxy —— 豆瓣封面有防盗链，直连 403
+ *   1. 由 Api 直接取封面；豆瓣请求头由同一传输层处理，无需电脑图片代理
  *   2. inSampleSize 降采样到目标尺寸附近 —— 不降采样的话几十张原图能把老设备的内存打爆
  *   3. 在 IO 线程下载、主线程交付；ImageView 复用时要校验 URL，避免GridView 滚动串图
  */

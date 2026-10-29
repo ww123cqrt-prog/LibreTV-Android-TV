@@ -2,6 +2,8 @@
 build/
 .gradle/
 local.properties
+.signing/
+.superpowers/
 *.iml
 .idea/
 captures/

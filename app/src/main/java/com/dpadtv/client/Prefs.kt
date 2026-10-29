@@ -19,6 +19,10 @@ class Prefs(ctx: Context) {
 
     private val sp = ctx.applicationContext.getSharedPreferences("dpadtv_native", Context.MODE_PRIVATE)
 
+    var nativeSourcesInitialized: Boolean
+        get() = sp.getBoolean("native_sources_initialized", false)
+        set(value) = sp.edit().putBoolean("native_sources_initialized", value).apply()
+
     var serverUrl: String
         get() = sp.getString("server_url", "") ?: ""
         set(v) = sp.edit().putString("server_url", v.trim().trimEnd('/')).apply()
@@ -316,7 +320,7 @@ class Prefs(ctx: Context) {
 }
 
 object HomeBar {
-    val DEFAULT = listOf("movie", "tv", "show", "search", "live", "history", "sources", "setup")
+    val DEFAULT = listOf("movie", "tv", "show", "search", "history", "sources", "setup")
 
     fun label(id: String): String = when (id) {
         "movie" -> "电影"
