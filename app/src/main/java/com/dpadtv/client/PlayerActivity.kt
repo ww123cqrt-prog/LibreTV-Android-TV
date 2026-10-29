@@ -829,7 +829,10 @@ class PlayerActivity : Activity() {
     private fun persistProgress() {
         if (sourceBackup != null) return
         val p = player ?: return
-        if (p.isPlaying || p.playbackState == Player.STATE_READY) {
+        // Seeking can be buffering with a known timeline; save its requested position on exit.
+        if (p.isPlaying || p.playbackState == Player.STATE_READY ||
+            (p.playbackState == Player.STATE_BUFFERING && p.duration > 0)
+        ) {
             val url = currentUrl()
             if (url.isEmpty()) return
             prefs.saveProgress(url, p.currentPosition)

@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.widget.GridView
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import kotlinx.coroutines.Job
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -77,7 +78,7 @@ class MainHistoryProbe(private val instrumentation: Instrumentation) {
             error(message)
         }
         try {
-            val cover = if (caseId == "r1") server.base + "/poster.png" else ""
+            val cover = if (caseId != "r7") server.base + "/poster.png" else ""
             val records = JSONArray()
             urls.forEachIndexed { index, url -> records.put(JSONObject()
                 .put("title", if (index == 0) "History A" else "History B")
@@ -86,12 +87,15 @@ class MainHistoryProbe(private val instrumentation: Instrumentation) {
             sp.edit().putString("history", records.toString()).commit()
             prefs.saveSources(if (caseId == "r7") listOf(SourceConfig("fixture", server.base + "/cms")) else emptyList())
             onMain {
+                // Enter the fixture after cancelling the startup recommendation dialog/request.
+                (MainActivity::class.java.getDeclaredField("job").apply { isAccessible = true }.get(main) as? Job)?.cancel()
+                MainActivity::class.java.getDeclaredMethod("dismissProgress").apply { isAccessible = true }.invoke(main)
                 MainActivity::class.java.getDeclaredMethod("showHistoryCards").apply { isAccessible = true }.invoke(main)
                 grid().requestFocus()
                 grid().setSelection(1)
             }
             instrumentation.waitForIdleSync()
-            if (caseId == "r1") {
+            if (caseId != "r7") {
                 val monitor = instrumentation.addMonitor(PlayerActivity::class.java.name, null, false)
                 onMain {
                     MainActivity::class.java.getDeclaredMethod("play", String::class.java, String::class.java)
@@ -104,8 +108,24 @@ class MainHistoryProbe(private val instrumentation: Instrumentation) {
                 lateinit var player: ExoPlayer
                 onMain { player = field.get(target) as ExoPlayer }
                 await("Player not ready") { player.playbackState == Player.STATE_READY }
-                onMain { player.pause(); player.seekTo(0, 6_000) }
-                await("Seek did not settle") { player.playbackState == Player.STATE_READY && player.currentPosition >= 5_900 }
+                var bufferingAtExit = false
+                var positionSavedOnPause = 0L
+                onMain {
+                    player.pause()
+                    player.seekTo(0, 6_000)
+                    if (caseId == "r1-seek") {
+                        bufferingAtExit = player.playbackState == Player.STATE_BUFFERING && player.duration > 0
+                        instrumentation.callActivityOnPause(target)
+                        positionSavedOnPause = prefs.history().first { it.playUrl == urls[1] }.positionMs
+                    }
+                }
+                if (caseId == "r1-seek") {
+                    check(bufferingAtExit) { "Immediate-exit fixture did not exercise a buffered seek" }
+                    check(positionSavedOnPause >= 5_900) { "Immediate exit while seeking did not save the requested position" }
+                }
+                if (caseId == "r1") await("Seek did not settle") {
+                    player.playbackState == Player.STATE_READY && player.currentPosition >= 5_900
+                }
                 onMain { target.finish() }
                 instrumentation.waitForIdleSync()
                 await("History did not receive the last saved position") {
@@ -138,7 +158,7 @@ class MainHistoryProbe(private val instrumentation: Instrumentation) {
             onMain { playback?.let { if (!it.isFinishing) it.finish() }; main.finish() }
             instrumentation.waitForIdleSync()
             sp.edit().putString("history", savedHistory).putString("sources", savedSources).commit()
-            if (caseId == "r1") urls.forEach { url ->
+            if (caseId != "r7") urls.forEach { url ->
                 prefs.clearProgress(url)
                 PlaybackCache.get(context).removeResource(url)
             }

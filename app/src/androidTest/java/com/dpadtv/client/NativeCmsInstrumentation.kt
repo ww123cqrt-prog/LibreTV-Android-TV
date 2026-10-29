@@ -27,7 +27,7 @@ class NativeCmsInstrumentation : Instrumentation() {
             if (options.getString("mode") == "regression") {
                 val caseId = options.getString("case").orEmpty()
                 val result = when (caseId) {
-                    "r1", "r7" -> MainHistoryProbe(this).run(caseId)
+                    "r1", "r1-seek", "r7" -> MainHistoryProbe(this).run(caseId)
                     "r2", "r3" -> PlaybackLifecycleProbe(this).run(caseId)
                     "r4" -> SourcePickerProbe(this).run()
                     "r4-unknown" -> SourcePickerProbe(this).run(unknownYear = true)
