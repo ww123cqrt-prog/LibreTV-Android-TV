@@ -5,7 +5,7 @@
 Goal: fix the eight reviewed P2 issues with focused regression evidence, preserve app identity and user data, and push individually reviewable commits.
 
 - [x] R6：JSON 年份入口兼容数字；验证翻拍分组及换源隔离。
-- [ ] R5：初次搜索与关键词重搜共享预算；验证累计期限。
+- [x] R5：初次搜索与关键词重搜共享预算；验证累计期限。
 - [x] R2：换集清除旧快进目标；受控两集短片验证。
 - [ ] R3：后台停止周期保存；验证后台时间不继续更新及恢复前台后的保存。
 - [x] R8：相同封面请求合并；验证重复绑定只下载一次。

@@ -29,21 +29,25 @@ class AppleCmsClient {
 
     private data class Outcome(val items: List<SearchItem>, val report: CmsSourceReport, val lastPage: Int = 0, val finished: Boolean = true)
 
-    fun search(keyword: String, sources: List<SourceConfig>, onProgress: ((SearchResult) -> Unit)? = null): SearchResult {
+    fun search(
+        keyword: String,
+        sources: List<SourceConfig>,
+        deadlineNanos: Long = System.nanoTime() + TimeUnit.SECONDS.toNanos(12),
+        onProgress: ((SearchResult) -> Unit)? = null,
+    ): SearchResult {
         val selected = sources.filter { it.enabled && !it.isAdult }
         if (selected.isEmpty()) { lastReports = emptyList(); return SearchResult(emptyList(), 0) }
         val pool = Executors.newFixedThreadPool(minOf(8, selected.size))
         val updates = LinkedBlockingQueue<Pair<Int, Outcome>>()
         val outcomes = arrayOfNulls<Outcome>(selected.size)
         val started = System.nanoTime()
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12)
         try {
             selected.forEachIndexed { index, source ->
-                pool.submit { searchSource(source, keyword) { updates.offer(index to it) } }
+                pool.submit { searchSource(source, keyword, deadlineNanos) { updates.offer(index to it) } }
             }
             var finished = 0
             while (finished < selected.size) {
-                val remaining = deadline - System.nanoTime()
+                val remaining = deadlineNanos - System.nanoTime()
                 if (remaining <= 0) break
                 val (index, update) = updates.poll(remaining, TimeUnit.NANOSECONDS) ?: break
                 outcomes[index] = update
@@ -81,9 +85,9 @@ class AppleCmsClient {
         return SearchResult(items, reports.count { !it.ok }, reports)
     }
 
-    private fun searchSource(source: SourceConfig, keyword: String, emit: (Outcome) -> Unit) {
+    private fun searchSource(source: SourceConfig, keyword: String, searchDeadlineNanos: Long, emit: (Outcome) -> Unit) {
         val started = System.nanoTime()
-        val deadline = started + TimeUnit.SECONDS.toNanos(10)
+        val deadline = minOf(started + TimeUnit.SECONDS.toNanos(10), searchDeadlineNanos)
         var host = ""
         try {
             val endpoint = endpoint(source)

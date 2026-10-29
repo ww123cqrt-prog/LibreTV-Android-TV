@@ -2243,6 +2243,7 @@ class MainActivity : Activity() {
         showResults()
         job = scope.launch {
             val owner = coroutineContext.job
+            val deadlineNanos = System.nanoTime() + 12_000_000_000L
             try {
                 val progress: (SearchResult) -> Unit = { partial ->
                     runOnUiThread {
@@ -2250,12 +2251,12 @@ class MainActivity : Activity() {
                     }
                 }
                 val result = runInterruptible(Dispatchers.IO) {
-                    val first = api.search(kw, sources, progress)
+                    val first = api.search(kw, sources, deadlineNanos, onProgress = progress)
                     // 只有正常返回却无匹配时才清洗片名；网络全部失败不再重复等一轮。
-                    if (first.items.isNotEmpty() || first.reports.none { it.ok }) first
+                    if (first.items.isNotEmpty() || first.reports.none { it.ok } || System.nanoTime() >= deadlineNanos) first
                     else {
                         val cleaned = cleanKeyword(kw)
-                        if (cleaned.isNotEmpty() && cleaned != kw) api.search(cleaned, sources, progress) else first
+                        if (cleaned.isNotEmpty() && cleaned != kw) api.search(cleaned, sources, deadlineNanos, onProgress = progress) else first
                     }
                 }
                 searchFinished = true

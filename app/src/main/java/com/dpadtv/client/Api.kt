@@ -5,6 +5,7 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
 
 /**
  * LibreTV 的 HTTP 契约（均由本机实测确认，不是照文档猜的）：
@@ -108,7 +109,12 @@ class Api(baseUrl: String = "", private val doubanEndpoint: String = "https://mo
     fun currentCookie(): String? = null
     fun status(): AppStatus = error("本应用无需配置服务器")
     fun login(password: String): AppStatus = error("本应用无需服务器登录")
-    fun search(keyword: String, sources: List<SourceConfig>, onProgress: ((SearchResult) -> Unit)? = null): SearchResult = cms.search(keyword, sources, onProgress)
+    fun search(
+        keyword: String,
+        sources: List<SourceConfig>,
+        deadlineNanos: Long = System.nanoTime() + TimeUnit.SECONDS.toNanos(12),
+        onProgress: ((SearchResult) -> Unit)? = null,
+    ): SearchResult = cms.search(keyword, sources, deadlineNanos, onProgress)
     fun detail(vodId: String, source: SourceConfig): Detail = cms.detail(vodId, source)
     fun testSource(url: String): Pair<Boolean, Int> = cms.testSource(url)
     fun douban(type: String, tag: String, pageStart: Int, pageSize: Int): List<DoubanItem> {

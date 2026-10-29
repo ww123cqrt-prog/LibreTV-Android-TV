@@ -150,6 +150,35 @@ class AppleCmsClientTest {
         }
     }
 
+    @Test(timeout = 4_000) fun apiRetriesShareTheCallersAbsoluteDeadline() {
+        val releaseRetry = CountDownLatch(1)
+        val retryStarted = CountDownLatch(1)
+        server.createContext("/budget") { exchange ->
+            if (exchange.requestURI.rawQuery.contains("wd=cleaned")) {
+                retryStarted.countDown()
+                releaseRetry.await(2, TimeUnit.SECONDS)
+            } else Thread.sleep(150)
+            val body = """{"list":[],"pagecount":1}""".toByteArray()
+            exchange.sendResponseHeaders(200, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
+        }
+        try {
+            val api = Api()
+            val sources = listOf(SourceConfig("budget", "$base/budget"))
+            val started = System.nanoTime()
+            val deadline = started + TimeUnit.MILLISECONDS.toNanos(700)
+            val first = api.search("original", sources, deadline)
+            assertTrue(first.items.isEmpty())
+            assertTrue(first.reports.single().ok)
+            val retry = api.search("cleaned", sources, deadline)
+            val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+            assertEquals(0L, retryStarted.count)
+            assertEquals(1, retry.failures)
+            assertEquals("TIMEOUT", retry.reports.single().category)
+            assertTrue("retry restarted the budget: ${elapsed}ms", elapsed < 1_500)
+        } finally { releaseRetry.countDown() }
+    }
+
     @Test fun recommendationsUseDirectUpstreamQueryAndPublicReferer() {
         val result = Api(doubanEndpoint = "$base/recommend").douban("movie", "热门", 48, 48)
         assertEquals(listOf("测试电影", "待评分"), result.map { it.title })
