@@ -458,7 +458,6 @@ class PlayerActivity : Activity() {
         if (kotlin.math.abs(prefs.playbackSpeed - 1f) > 0.01f) {
             toast("当前倍速 ${speedLabel(prefs.playbackSpeed)}（在上键菜单里可改回 X1.00）")
         }
-        handler.postDelayed(saveTick, SAVE_INTERVAL_MS)
         updatePlayPauseIcon()
         updateChrome()
     }
@@ -934,12 +933,18 @@ class PlayerActivity : Activity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        handler.postDelayed(saveTick, SAVE_INTERVAL_MS)
+    }
+
     override fun onStop() {
         super.onStop()
         sourceJob?.cancel()
         sourceDialog?.dismiss()
         restoreSource(null, playWhenReady = false)
         persistProgress()
+        handler.removeCallbacks(saveTick)
         player?.pause()
     }
 

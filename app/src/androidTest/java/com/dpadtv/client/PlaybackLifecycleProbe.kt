@@ -85,8 +85,17 @@ class PlaybackLifecycleProbe(private val instrumentation: Instrumentation) {
             check(afterWait == stoppedAt) {
                 "Stopped player kept rewriting history: stoppedAt=$stoppedAt afterWait=$afterWait ${state()}"
             }
+            onMain {
+                instrumentation.callActivityOnStart(target)
+                instrumentation.callActivityOnResume(target)
+            }
+            await("Foreground player did not resume periodic history saves") {
+                prefs.history().first { it.playUrl == urls[0] }.updatedAt > afterWait
+            }
+            val resumedAt = prefs.history().first { it.playUrl == urls[0] }.updatedAt
             return JSONObject().put("case", caseId).put("stoppedUpdatedAt", stoppedAt)
-                .put("afterWaitUpdatedAt", afterWait).put("waitMs", 11_000).put("player", state())
+                .put("afterWaitUpdatedAt", afterWait).put("resumedUpdatedAt", resumedAt)
+                .put("waitMs", 11_000).put("player", state())
         } finally {
             activity?.let { target -> instrumentation.runOnMainSync { if (!target.isFinishing) target.finish() } }
             instrumentation.waitForIdleSync()
