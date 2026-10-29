@@ -38,6 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runInterruptible
@@ -59,6 +60,7 @@ class MainActivity : Activity() {
     private var job: Job? = null
     private var returningFromPlayback = false
     private var refreshHistoryCards: (() -> Unit)? = null
+    private var historyCoverJob: Job? = null
 
     private var lastResults: List<SearchItem> = emptyList()
     private var resultGroups: List<SearchGroup> = emptyList()
@@ -2635,21 +2637,24 @@ class MainActivity : Activity() {
     /** 继续观看：卡片形式（封面 + 片名 + 进度） */
     private fun showHistoryCards() {
         refreshHistoryCards = null
-        // 历史里缺封面的记录：用片名反查一次，拿到海报就写回（最多补 5 条）
-        prefs.history().filter { it.cover.isEmpty() }.take(5).forEach { h ->
-            scope.launch {
-                val items = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    runCatching {
-                        api.search(h.title, prefs.sources().filter { it.enabled }).items
-                    }.getOrDefault(emptyList())
-                }
-                val cover = items.firstOrNull { it.name == h.title }?.pic
-                    ?: items.firstOrNull()?.pic.orEmpty()
-                if (cover.isNotEmpty()) {
-                    prefs.updateHistoryCover(h.playUrl, cover)
-                    withContext(kotlinx.coroutines.Dispatchers.Main) {
-                        if (currentScreen == "history") showHistoryCards()
-                    }
+        // 一个补图批次最多 5 条；只更新现有卡片，不从回调重新启动搜索。
+        if (historyCoverJob?.isActive != true) {
+            val missing = prefs.history().filter { it.cover.isEmpty() }.take(5)
+            if (missing.isNotEmpty()) historyCoverJob = scope.launch {
+                coroutineScope {
+                    missing.forEach { h -> launch {
+                        val items = runInterruptible(Dispatchers.IO) {
+                            runCatching {
+                                api.search(h.title, prefs.sources().filter { it.enabled }).items
+                            }.getOrDefault(emptyList())
+                        }
+                        val cover = items.firstOrNull { it.name == h.title }?.pic
+                            ?: items.firstOrNull()?.pic.orEmpty()
+                        if (cover.isNotEmpty()) {
+                            prefs.updateHistoryCover(h.playUrl, cover)
+                            if (currentScreen == "history") refreshHistoryCards?.invoke()
+                        }
+                    } }
                 }
             }
         }
