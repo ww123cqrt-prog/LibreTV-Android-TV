@@ -938,12 +938,16 @@ class PlayerActivity : Activity() {
         handler.postDelayed(saveTick, SAVE_INTERVAL_MS)
     }
 
+    override fun onPause() {
+        persistProgress()
+        super.onPause()
+    }
+
     override fun onStop() {
         super.onStop()
         sourceJob?.cancel()
         sourceDialog?.dismiss()
         restoreSource(null, playWhenReady = false)
-        persistProgress()
         handler.removeCallbacks(saveTick)
         player?.pause()
     }

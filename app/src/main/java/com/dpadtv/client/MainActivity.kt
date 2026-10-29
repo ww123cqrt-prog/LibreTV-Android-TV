@@ -57,6 +57,8 @@ class MainActivity : Activity() {
     private lateinit var root: FrameLayout
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var job: Job? = null
+    private var returningFromPlayback = false
+    private var refreshHistoryCards: (() -> Unit)? = null
 
     private var lastResults: List<SearchItem> = emptyList()
     private var resultGroups: List<SearchGroup> = emptyList()
@@ -231,6 +233,10 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         hideSystemUi()
+        if (returningFromPlayback) {
+            returningFromPlayback = false
+            if (currentScreen == "history") refreshHistoryCards?.invoke()
+        }
     }
 
     private fun hideSystemUi() {
@@ -305,6 +311,7 @@ class MainActivity : Activity() {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun setScreen(view: View, focusFirst: Boolean = true) {
+        if (currentScreen != "history") refreshHistoryCards = null
         root.removeAllViews()
         root.addView(view, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -2456,6 +2463,7 @@ class MainActivity : Activity() {
     /** 整季播放：把整个集数列表交给播放器，一集放完自动进下一集 */
     private fun playFromList(urls: List<String>, index: Int, title: String, cover: String = "", source: SearchItem? = null) {
         if (urls.isEmpty()) return
+        returningFromPlayback = true
         startActivity(Intent(this, PlayerActivity::class.java).apply {
             putStringArrayListExtra(PlayerActivity.EXTRA_URLS, ArrayList(urls))
             putExtra(PlayerActivity.EXTRA_INDEX, index.coerceIn(0, urls.size - 1))
@@ -2626,6 +2634,7 @@ class MainActivity : Activity() {
 
     /** 继续观看：卡片形式（封面 + 片名 + 进度） */
     private fun showHistoryCards() {
+        refreshHistoryCards = null
         // 历史里缺封面的记录：用片名反查一次，拿到海报就写回（最多补 5 条）
         prefs.history().filter { it.cover.isEmpty() }.take(5).forEach { h ->
             scope.launch {
@@ -2652,7 +2661,8 @@ class MainActivity : Activity() {
         }
         col.addView(brandRow(false))
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        bar.addView(titleText("继续观看 · ${items2.size} 条", 18f))
+        val historyCount = titleText("继续观看 · ${items2.size} 条", 18f)
+        bar.addView(historyCount)
         bar.addView(button("返回搜索") { showRecommend() })
         if (items2.isNotEmpty()) {
             bar.addView(button("清空历史") { prefs.clearHistory(); toast("已清空"); showHistoryCards() })
@@ -2715,6 +2725,17 @@ class MainActivity : Activity() {
             }
             grid.setOnItemClickListener { _, _, pos, _ ->
                 items2.getOrNull(pos)?.let { play(it.playUrl, it.title) }
+            }
+            refreshHistoryCards = {
+                val selectedUrl = (grid.selectedItem as? HistoryEntry)?.playUrl
+                val hadFocus = grid.hasFocus()
+                items2.clear()
+                items2.addAll(prefs.history())
+                historyCount.text = "继续观看 · ${items2.size} 条"
+                (grid.adapter as BaseAdapter).notifyDataSetChanged()
+                if (hadFocus && selectedUrl != null) {
+                    grid.setSelection(items2.indexOfFirst { it.playUrl == selectedUrl }.coerceAtLeast(0))
+                }
             }
             grid.setOnItemLongClickListener { _, _, pos, _ ->
                 prefs.removeHistory(items2[pos].playUrl)
