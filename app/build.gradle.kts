@@ -20,8 +20,8 @@ android {
         // 23 = Android 6.0：Media3 的下限之上，老盒子都能装
         minSdk = 23
         targetSdk = 37
-        versionCode = 7
-        versionName = "0.1.6"
+        versionCode = 8
+        versionName = "0.1.7"
         testInstrumentationRunner = "com.dpadtv.client.NativeCmsInstrumentation"
     }
 
