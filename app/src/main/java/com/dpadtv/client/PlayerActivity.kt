@@ -376,6 +376,8 @@ class PlayerActivity : Activity() {
 
                 exo.addListener(object : Player.Listener {
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                        pendingSeek = -1L
+                        handler.removeCallbacks(clearPendingSeek)
                         currentIndex = exo.currentMediaItemIndex
                         hasError = false
                         baseText = labelFor(currentIndex) + currentSource?.let { " · ${it.sourceName}" }.orEmpty()
