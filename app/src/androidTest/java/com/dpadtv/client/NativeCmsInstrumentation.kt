@@ -24,6 +24,21 @@ class NativeCmsInstrumentation : Instrumentation() {
             .put("backend", "none; Kotlin direct Apple CMS requests")
         val started = System.nanoTime()
         try {
+            if (options.getString("mode") == "regression") {
+                val caseId = options.getString("case").orEmpty()
+                val result = when (caseId) {
+                    "r1", "r7" -> MainHistoryProbe(this).run(caseId)
+                    "r2", "r3" -> PlaybackLifecycleProbe(this).run(caseId)
+                    "r4" -> SourcePickerProbe(this).run()
+                    "r4-unknown" -> SourcePickerProbe(this).run(unknownYear = true)
+                    "r5" -> SearchBudgetProbe(this).run()
+                    "r8" -> ImageLoadProbe(this).run()
+                    else -> error("Unknown regression case: $caseId")
+                }
+                report.put("regression", result).put("elapsedMs", (System.nanoTime() - started) / 1_000_000)
+                finish(0, Bundle().apply { putString("report", report.toString()) })
+                return
+            }
             if (options.getString("mode") == "switch-player") {
                 report.put("switching", PlaybackSwitchProbe(this).run())
                     .put("elapsedMs", (System.nanoTime() - started) / 1_000_000)
@@ -127,7 +142,7 @@ class NativeCmsInstrumentation : Instrumentation() {
             finish(0, Bundle().apply { putString("report", report.toString()) })
         } catch (error: Exception) {
             report.put("fatal", error.javaClass.simpleName).put("elapsedMs", (System.nanoTime() - started) / 1_000_000)
-            if (options.getString("mode") == "switch-player") report.put("message", error.message)
+            if (options.getString("mode") in listOf("switch-player", "regression")) report.put("message", error.message)
             targetContext.openFileOutput("p0-native-cms-report.json", 0).bufferedWriter().use { it.write(report.toString(2)) }
             finish(1, Bundle().apply { putString("report", report.toString()) })
         }
