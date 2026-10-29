@@ -32,8 +32,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -478,48 +476,62 @@ class PlayerActivity : Activity() {
         val year = active?.year.orEmpty()
         sourceJob = sourceScope.launch {
             try {
-                val result = runInterruptible(sourceDispatcher) { Api().search(searchTitle, sources) }
-                val matches = PlaybackSourceRules.matching(result.items, searchTitle, year)
-                    .filterNot { it.sourceUrl == active?.sourceUrl && it.vodId == active?.vodId }
                 val candidates = mutableListOf<SourceCandidate>()
                 val adapter = ArrayAdapter<String>(this@PlayerActivity, android.R.layout.simple_list_item_1)
                 val episode = if (urls.size == 1) historyEpisodeIndex else currentIndex
                 val pickerTitle = "选择来源 · 第 ${episode + 1} 集"
                 var picker: AlertDialog? = null
                 coroutineScope {
-                    matches.map { item -> async(sourceDispatcher) {
-                        val started = System.nanoTime()
-                        val detail = runInterruptible {
-                            runCatching {
-                                Api().detail(item.vodId, sources.first { it.url == item.sourceUrl })
+                    val lookup = this
+                    val seen = mutableSetOf<Pair<String, String>>()
+                    fun enqueue(items: List<SearchItem>, complete: Boolean) {
+                        // 明确年份时，缺失年份的资源等完整结果后再按翻拍隔离规则判断。
+                        val eligible = if (year.isNotEmpty() && !complete) items.filter { it.year.isNotEmpty() } else items
+                        val matches = PlaybackSourceRules.matching(eligible, searchTitle, year)
+                            .filterNot { it.sourceUrl == active?.sourceUrl && it.vodId == active?.vodId }
+                        for (item in matches) {
+                            if (!seen.add(item.sourceUrl to item.vodId)) continue
+                            lookup.launch(sourceDispatcher) {
+                                val started = System.nanoTime()
+                                val detail = runInterruptible {
+                                    runCatching {
+                                        Api().detail(item.vodId, sources.first { it.url == item.sourceUrl })
+                                    }
+                                }.getOrNull()
+                                val candidate = detail?.let {
+                                    val resolved = item.copy(name = it.info.title.ifEmpty { item.name }, year = it.info.year.ifEmpty { item.year })
+                                    if (PlaybackSourceRules.matching(listOf(resolved), searchTitle, year).isEmpty()) null
+                                    else SourceCandidate(resolved, it, (System.nanoTime() - started) / 1_000_000)
+                                }
+                                if (candidate != null) withContext(Dispatchers.Main.immediate) {
+                                    val selected = picker?.listView?.selectedItemPosition?.let { candidates.getOrNull(it) }
+                                    candidates.add(candidate)
+                                    candidates.sortBy { it.responseMs }
+                                    adapter.setNotifyOnChange(false)
+                                    adapter.clear()
+                                    adapter.addAll(candidates.map {
+                                        "${it.item.sourceName} · ${it.item.year.ifEmpty { "年份未知" }} · ${it.detail.episodes.size}集 · 响应${it.responseMs}ms"
+                                    })
+                                    adapter.notifyDataSetChanged()
+                                    if (picker == null) {
+                                        loading.dismiss()
+                                        picker = AlertDialog.Builder(this@PlayerActivity)
+                                            .setTitle("$pickerTitle · 继续查找中")
+                                            .setAdapter(adapter) { _, which -> switchToSource(candidates[which]) }
+                                            .setNegativeButton("取消", null)
+                                            .setOnDismissListener { sourceJob?.cancel(); showActions() }.show()
+                                        sourceDialog = picker
+                                    } else if (selected != null) picker?.listView?.setSelection(candidates.indexOf(selected))
+                                }
                             }
-                        }.getOrNull()
-                        val candidate = detail?.let {
-                            val resolved = item.copy(name = it.info.title.ifEmpty { item.name }, year = it.info.year.ifEmpty { item.year })
-                            if (PlaybackSourceRules.matching(listOf(resolved), searchTitle, year).isEmpty()) null
-                            else SourceCandidate(resolved, it, (System.nanoTime() - started) / 1_000_000)
                         }
-                        if (candidate != null) withContext(Dispatchers.Main.immediate) {
-                            val selected = picker?.listView?.selectedItemPosition?.let { candidates.getOrNull(it) }
-                            candidates.add(candidate)
-                            candidates.sortBy { it.responseMs }
-                            adapter.setNotifyOnChange(false)
-                            adapter.clear()
-                            adapter.addAll(candidates.map {
-                                "${it.item.sourceName} · ${it.item.year.ifEmpty { "年份未知" }} · ${it.detail.episodes.size}集 · 响应${it.responseMs}ms"
-                            })
-                            adapter.notifyDataSetChanged()
-                            if (picker == null) {
-                                loading.dismiss()
-                                picker = AlertDialog.Builder(this@PlayerActivity)
-                                    .setTitle("$pickerTitle · 继续查找中")
-                                    .setAdapter(adapter) { _, which -> switchToSource(candidates[which]) }
-                                    .setNegativeButton("取消", null)
-                                    .setOnDismissListener { sourceJob?.cancel(); showActions() }.show()
-                                sourceDialog = picker
-                            } else if (selected != null) picker?.listView?.setSelection(candidates.indexOf(selected))
+                    }
+                    val result = runInterruptible(Dispatchers.IO) {
+                        Api().search(searchTitle, sources) { partial ->
+                            lookup.launch(Dispatchers.Main.immediate) { enqueue(partial.items, complete = false) }
                         }
-                    } }.awaitAll()
+                    }
+                    enqueue(result.items, complete = true)
                 }
                 loading.dismiss()
                 if (candidates.isEmpty()) { toast("没有找到其他可用的同片来源"); return@launch }
