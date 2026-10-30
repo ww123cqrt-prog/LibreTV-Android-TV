@@ -201,6 +201,10 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("auto_next", true)
         set(v) = sp.edit().putBoolean("auto_next", v).apply()
 
+    var nextEpisodePreloadEnabled: Boolean
+        get() = sp.getBoolean("next_episode_preload", true)
+        set(v) = sp.edit().putBoolean("next_episode_preload", v).apply()
+
     /** 是否记住播放进度并在下次续播 */
     var resumeEnabled: Boolean
         get() = sp.getBoolean("resume_enabled", true)
@@ -260,6 +264,38 @@ class Prefs(ctx: Context) {
         val editor = sp.edit()
         sp.all.keys.filter { it.startsWith("pos:") }.forEach { editor.remove(it) }
         editor.apply()
+    }
+
+    fun exportBackup(): String = AppBackup.encode(BackupSnapshot(
+        sources(), history(),
+        sp.all.filterKeys { it.startsWith("pos:") }.mapValues { (_, value) -> value as Long },
+        BackupSettings(seekStepSeconds, autoNext, resumeEnabled, resumeThresholdSeconds, playbackSpeed,
+            decodeMode, cacheLimitMb, nextEpisodePreloadEnabled, homeBarOrder(), homeBarHidden(), searchHistory()),
+    ))
+
+    /** The UI supplies an already parsed snapshot. One editor keeps related values together. */
+    fun restoreBackup(backup: BackupSnapshot): Boolean {
+        val editor = sp.edit()
+        sp.all.keys.filter { it.startsWith("pos:") }.forEach { editor.remove(it) }
+        backup.positions.forEach { (key, value) -> editor.putLong(key, value) }
+        val sources = JSONArray().apply { backup.sources.forEach { put(it.toJson()) } }
+        val history = JSONArray().apply {
+            backup.history.forEach { h ->
+                put(JSONObject().put("title", h.title).put("playUrl", h.playUrl)
+                    .put("positionMs", h.positionMs).put("durationMs", h.durationMs)
+                    .put("updatedAt", h.updatedAt).put("cover", h.cover))
+            }
+        }
+        val s = backup.settings
+        return editor.putString("sources", sources.toString()).putString("history", history.toString())
+            .putBoolean("native_sources_initialized", true)
+            .putInt("seek_step", s.seekStepSeconds).putBoolean("auto_next", s.autoNext)
+            .putBoolean("resume_enabled", s.resumeEnabled).putInt("resume_threshold", s.resumeThresholdSeconds)
+            .putFloat("playback_speed", s.playbackSpeed).putInt("decode_mode", s.decodeMode)
+            .putInt("cache_limit_mb", s.cacheLimitMb).putBoolean("next_episode_preload", s.nextEpisodePreloadEnabled)
+            .putString("home_bar_order", s.homeBarOrder.joinToString(","))
+            .putString("home_bar_hidden", s.homeBarHidden.joinToString(","))
+            .putString("search_history", s.searchHistory.joinToString("\n")).commit()
     }
     /** 首页顶部按钮顺序（id 列表） */
     fun homeBarOrder(): MutableList<String> {

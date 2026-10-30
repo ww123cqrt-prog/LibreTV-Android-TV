@@ -20,6 +20,10 @@ import android.widget.Toast
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -79,6 +83,7 @@ class PlayerActivity : Activity() {
     private lateinit var playPauseIcon: ImageView
     private lateinit var seekBar: ProgressBar
     private lateinit var timeText: TextView
+    private lateinit var resolutionText: TextView
     private lateinit var bufferingText: TextView
     private lateinit var speedText: TextView
     private lateinit var actionBar: LinearLayout
@@ -106,6 +111,15 @@ class PlayerActivity : Activity() {
     private var pendingSeek = -1L
     private var hasError = false
     private var aspectMode = 0
+    private var videoFrameRendered = false
+    private var foreground = false
+    private lateinit var prefetchCacheFactory: CacheDataSource.Factory
+    private lateinit var prefetchHttpFactory: DataSource.Factory
+    private val prefetchDispatcher = Dispatchers.IO.limitedParallelism(1)
+    private var prefetchWorker: NextEpisodePrefetcher? = null
+    private var prefetchJob: Job? = null
+    private var prefetchUrl = ""
+    private var completedPrefetchUrl = ""
 
     private val handler = Handler(Looper.getMainLooper())
     private val sourceTimeout = Runnable { restoreSource("换源等待超时，正在恢复原来源") }
@@ -236,6 +250,12 @@ class PlayerActivity : Activity() {
             setTextSize(14f)
             setPadding(24, 0, 0, 0)
         }
+        resolutionText = TextView(this).apply {
+            text = "分辨率 未知"
+            setTextColor(0xFFCBD5E1.toInt())
+            setTextSize(13f)
+            setPadding(dp(16), 0, 0, 0)
+        }
         progressRow.addView(
             playPauseIcon,
             LinearLayout.LayoutParams(
@@ -245,6 +265,7 @@ class PlayerActivity : Activity() {
         )
         progressRow.addView(seekBar)
         progressRow.addView(timeText)
+        progressRow.addView(resolutionText)
         root.addView(
             progressRow,
             FrameLayout.LayoutParams(
@@ -360,6 +381,11 @@ class PlayerActivity : Activity() {
             .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         val mediaSourceFactory =
             androidx.media3.exoplayer.source.DefaultMediaSourceFactory(cacheFactory)
+        prefetchHttpFactory = DefaultHttpDataSource.Factory().setUserAgent("DpadTV-Android")
+            .setConnectTimeoutMs(3_000).setReadTimeoutMs(3_000)
+        prefetchCacheFactory = CacheDataSource.Factory().setCache(PlaybackCache.get(this))
+            .setUpstreamDataSourceFactory(prefetchHttpFactory)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR or CacheDataSource.FLAG_BLOCK_ON_CACHE)
 
         player = ExoPlayer.Builder(this)
             .setLoadControl(loadControl)
@@ -374,6 +400,10 @@ class PlayerActivity : Activity() {
 
                 exo.addListener(object : Player.Listener {
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                        cancelNextEpisodePrefetch()
+                        completedPrefetchUrl = ""
+                        videoFrameRendered = false
+                        resolutionText.text = "分辨率 未知"
                         pendingSeek = -1L
                         handler.removeCallbacks(clearPendingSeek)
                         currentIndex = exo.currentMediaItemIndex
@@ -404,15 +434,24 @@ class PlayerActivity : Activity() {
                             prefs.clearProgress(currentUrl())
                         }
                         updateChrome()
+                        updateNextEpisodePrefetch()
+                    }
+
+                    override fun onIsLoadingChanged(isLoading: Boolean) {
+                        updateNextEpisodePrefetch()
                     }
 
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         updatePlayPauseIcon()
                         updateChrome()
                         if (!isPlaying) showProgress()
+                        updateNextEpisodePrefetch()
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
+                        cancelNextEpisodePrefetch()
+                        videoFrameRendered = false
+                        resolutionText.text = "分辨率 未知"
                         if (sourceBackup != null) {
                             restoreSource("该来源无法播放，正在恢复原来源")
                             return
@@ -431,13 +470,20 @@ class PlayerActivity : Activity() {
                         updateChrome()
                     }
 
+                    override fun onVideoSizeChanged(videoSize: VideoSize) {
+                        if (videoFrameRendered) showResolution(videoSize)
+                    }
+
                     override fun onRenderedFirstFrame() {
+                        videoFrameRendered = true
+                        showResolution(exo.videoSize)
                         if (sourceBackup != null) {
                             sourceBackup = null
                             handler.removeCallbacks(sourceTimeout)
                             sourceAction.isEnabled = true
                             toast("已切换到 ${currentSource?.sourceName} · 第 ${currentIndex + 1} 集")
                         }
+                        updateNextEpisodePrefetch()
                     }
                 })
 
@@ -458,6 +504,48 @@ class PlayerActivity : Activity() {
         }
         updatePlayPauseIcon()
         updateChrome()
+    }
+
+    /** Let the current episode finish buffering before using idle bandwidth for its immediate successor. */
+    private fun updateNextEpisodePrefetch() {
+        val p = player ?: return
+        val buffered = p.bufferedPosition - p.currentPosition >= 15_000L ||
+            (p.duration > 0 && p.bufferedPosition >= p.duration)
+        val nextUrl = if (foreground && prefs.nextEpisodePreloadEnabled && sourceBackup == null &&
+            p.isPlaying && p.playbackState == Player.STATE_READY && !p.isLoading && buffered
+        ) urls.getOrNull(p.nextMediaItemIndex) else null
+        if (nextUrl.isNullOrEmpty()) { cancelNextEpisodePrefetch(); return }
+        if (nextUrl == prefetchUrl || nextUrl == completedPrefetchUrl) return
+        cancelNextEpisodePrefetch()
+        val worker = NextEpisodePrefetcher(prefetchCacheFactory, prefetchHttpFactory)
+        val height = p.videoSize.height
+        prefetchWorker = worker
+        prefetchUrl = nextUrl
+        prefetchJob = sourceScope.launch {
+            try {
+                runInterruptible(prefetchDispatcher) { worker.cache(nextUrl, height) }
+                completedPrefetchUrl = nextUrl
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // This optional network/playlist boundary must never fail the current video or retry in a loop.
+                completedPrefetchUrl = nextUrl
+            } finally {
+                if (prefetchWorker === worker) {
+                    prefetchWorker = null
+                    prefetchJob = null
+                    prefetchUrl = ""
+                }
+            }
+        }
+    }
+
+    private fun cancelNextEpisodePrefetch() {
+        prefetchWorker?.cancel()
+        prefetchJob?.cancel()
+        prefetchWorker = null
+        prefetchJob = null
+        prefetchUrl = ""
     }
 
     /* ------------------------------------------------------------ 播放中换源 */
@@ -551,6 +639,8 @@ class PlayerActivity : Activity() {
             toast("该来源没有第 ${targetIndex + 1} 集，保留当前播放")
             return
         }
+        cancelNextEpisodePrefetch()
+        completedPrefetchUrl = ""
         persistProgress()
         val previous = SourceBackup(urls, p.currentMediaItemIndex, p.currentPosition, p.playWhenReady,
             currentSource, seriesTitle, coverUrl, historyEpisodeIndex)
@@ -572,6 +662,8 @@ class PlayerActivity : Activity() {
     private fun restoreSource(message: String?, playWhenReady: Boolean = player?.playWhenReady ?: false) {
         val previous = sourceBackup ?: return
         sourceBackup = null
+        cancelNextEpisodePrefetch()
+        completedPrefetchUrl = ""
         handler.removeCallbacks(sourceTimeout)
         sourceAction.isEnabled = true
         urls = previous.urls
@@ -588,6 +680,12 @@ class PlayerActivity : Activity() {
     }
 
     /* ------------------------------------------------------------ 显示逻辑 */
+
+    private fun showResolution(size: VideoSize) {
+        resolutionText.text = if (size.width > 0 && size.height > 0) {
+            "分辨率 ${size.width} × ${size.height}"
+        } else "分辨率 未知"
+    }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
@@ -953,7 +1051,15 @@ class PlayerActivity : Activity() {
         handler.postDelayed(saveTick, SAVE_INTERVAL_MS)
     }
 
+    override fun onResume() {
+        super.onResume()
+        foreground = true
+        updateNextEpisodePrefetch()
+    }
+
     override fun onPause() {
+        foreground = false
+        cancelNextEpisodePrefetch()
         persistProgress()
         super.onPause()
     }
@@ -968,6 +1074,7 @@ class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        cancelNextEpisodePrefetch()
         sourceScope.cancel()
         handler.removeCallbacks(sourceTimeout)
         handler.removeCallbacks(saveTick)

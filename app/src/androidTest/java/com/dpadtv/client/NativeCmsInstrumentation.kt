@@ -33,6 +33,12 @@ class NativeCmsInstrumentation : Instrumentation() {
                     "r4-unknown" -> SourcePickerProbe(this).run(unknownYear = true)
                     "r5" -> SearchBudgetProbe(this).run()
                     "r8" -> ImageLoadProbe(this).run()
+                    "backup-roundtrip", "backup-export" -> BackupProbe(this).run(caseId)
+                    "backup-downloads" -> BackupProbe(this).downloads()
+                    "player-quality" -> PlayerToolsProbe(this).quality()
+                    "player-prefetch-pause" -> PlayerToolsProbe(this).prefetchPause()
+                    "player-prefetch-auto" -> PlayerToolsProbe(this).prefetchAuto()
+                    "next-episode-cache", "next-episode-limit", "next-episode-cancel" -> NextEpisodeCacheProbe(this).run(caseId)
                     "prefetch-initial", "prefetch-covers", "prefetch-page", "prefetch-scope", "prefetch-background", "prefetch-retry", "prefetch-empty-resume" ->
                         RecommendPrefetchProbe(this).run(caseId)
                     else -> error("Unknown regression case: $caseId")

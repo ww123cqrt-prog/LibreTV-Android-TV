@@ -6,11 +6,11 @@ This is a projector / Android TV adaptation based on DpadTV and LibreSpark/Libre
 
 应用名称为 **LibreTV**，仓库名为 **LibreTV-Android-TV**。本项目是社区适配版本，与两个上游项目没有官方发布关系。开发来源、固定提交和修改说明见 [NOTICE.md](NOTICE.md)。
 
-当前版本为 0.1.8，显示名称为 LibreTV，延续本适配版包名和开发签名。电影、剧集各有 10 个推荐标签；搜索结果按片名和年份合卡，详情页和播放器均可换源。目标是无需电脑的日常影视点播：推荐、全源搜索、选集、遥控播放和续播。直播、应用内更新等扩展功能已取消，不作为交付要求。
+当前版本为 0.1.9，显示名称为 LibreTV，延续本适配版包名和开发签名。电影、剧集各有 10 个推荐标签；搜索结果按片名和年份合卡，详情页和播放器均可换源。目标是无需电脑的日常影视点播：推荐、全源搜索、选集、遥控播放和续播。直播、应用内更新等扩展功能已取消，不作为交付要求。
 
 ## 安装与使用
 
-从 [Releases](https://github.com/ww123cqrt-prog/LibreTV-Android-TV/releases) 下载 APK。当前为 0.1.8 / versionCode 9 的调试预发布包，沿用已有开发签名。Android 最低要求为 6.0 / API 23，已测设备为坚果 N5 Pro（Android 14 / API 34，ARM64）；其他设备尚未逐一验收。
+从 [Releases](https://github.com/ww123cqrt-prog/LibreTV-Android-TV/releases) 下载 APK。当前为 0.1.9 / versionCode 10 的调试预发布包，沿用已有开发签名。Android 最低要求为 6.0 / API 23，已测设备为坚果 N5 Pro（Android 14 / API 34，ARM64）；其他设备尚未逐一验收。
 
 包名为 `local.libretv.standalone.tv`，与原版 `com.dpadtv.client` 并存，配置、历史和缓存分开保存。首次运行从 APK 内置文件载入 9 个可编辑的公开接口地址，以后不会覆盖手动修改；不读取其他应用的配置。这些第三方地址的可用性不由本项目保证，也不包含用户账号或登录凭据。
 
@@ -22,13 +22,15 @@ This is a projector / Android TV adaptation based on DpadTV and LibreSpark/Libre
 
 首页接近已加载列表末尾前约两屏时，会静默读取下一批，并提前准备后约两屏的封面；追加到原海报墙，保留焦点与滚动位置。换分类、离开页面或进入后台后停止后续预读。预读失败保留当前列表，在末尾继续按下键即可重试。范围和测试见 [0.1.8 预加载记录](docs/recommend-prefetch-0.1.8.md)。
 
+0.1.9 新增实际视频分辨率显示、应用内备份恢复、下一集开头预缓存。暂停或打开播放操作栏可看分辨率；设置中一键导出到“下载/LibreTV”，恢复时选择文件并确认替换；播放设置可关闭下一集预缓存。预取目标约 12 秒、应用读取最多 4 MiB，并让当前播放缓冲优先。覆盖与实测范围见 [0.1.9 功能与验收记录](docs/player-tools-0.1.9.md)。
+
 片源仍需要互联网。封面、目录与视频分别请求各自的外部地址。App 不使用 `127.0.0.1:18080`，不需要 ADB reverse。
 
 也可通过已经连接的 ADB 安装，将示例中的设备序列号替换为 `adb devices` 列出的实际值。无线端口以当前设备状态为准：
 
 ```powershell
 $serial = 'YOUR_DEVICE_SERIAL'
-adb -s $serial install -r '.\LibreTV-0.1.8.apk'
+adb -s $serial install -r '.\LibreTV-0.1.9.apk'
 adb -s $serial shell am start -W -n local.libretv.standalone.tv/com.dpadtv.client.MainActivity
 ```
 
@@ -101,7 +103,7 @@ adb -s emulator-5554 shell am instrument -w -r -e mode regression -e case r4 loc
 
 推荐列表直连 `movie.douban.com`，图片直连 `doubanio.com` 子域；只传公开的 User-Agent 和 Referer，不需要豆瓣登录，也不走电脑图片代理。
 
-测试调用生产 Kotlin API，报告每个源的分类错误、耗时、结果数、详情集数和前 2048 字节媒体列表请求。媒体列表 HTTP 200 不能代替真正解码播放；真实播放另见验收报告。当前 JVM 测试为 60/60，在 0.1.6 的 56 项基础上增加 3 项数字年份兼容性测试和 1 项共享搜索期限测试。模拟器回归另覆盖历史刷新、跨集快进、后台保存、渐进换源、重搜预算、补封面和图片请求合并。
+测试调用生产 Kotlin API，报告每个源的分类错误、耗时、结果数、详情集数和前 2048 字节媒体列表请求。媒体列表 HTTP 200 不能代替真正解码播放；真实播放另见验收报告。当前 JVM 测试为 67/67，保留原 60 项，并增加 7 项备份往返与损坏数据检查。模拟器回归另覆盖历史刷新、跨集快进、后台保存、渐进换源、重搜预算、补封面和图片请求合并。
 
 ## 签名、源码与许可证
 

@@ -3,6 +3,10 @@ package com.dpadtv.client
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.ContentValues
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -84,6 +88,8 @@ class MainActivity : Activity() {
     /** 设置页是否展开「服务器连接」区块。已连接时默认收起（低频操作不占首屏） */
     private var setupShowFields = false
     private val REQ_PICK_JSON = 1001
+    private val REQ_EXPORT_BACKUP = 1003
+    private val REQ_RESTORE_BACKUP = 1004
     private val REQ_STORAGE = 1002
 
     /* ---------------------------------------------------------- 焦点视觉 */
@@ -873,6 +879,49 @@ class MainActivity : Activity() {
     @Deprecated("系统文件选择器仍走 startActivityForResult")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode in listOf(REQ_EXPORT_BACKUP, REQ_RESTORE_BACKUP)) {
+            if (resultCode != RESULT_OK) return
+            val uri = data?.data ?: return
+            scope.launch {
+                try {
+                    if (requestCode == REQ_EXPORT_BACKUP) {
+                        runInterruptible(Dispatchers.IO) {
+                            requireNotNull(contentResolver.openOutputStream(uri, "wt")) { "无法写入这个位置" }
+                                .bufferedWriter(Charsets.UTF_8).use { it.write(prefs.exportBackup()) }
+                        }
+                        toast("备份已保存")
+                    } else {
+                        val backup = runInterruptible(Dispatchers.IO) {
+                            val text = requireNotNull(contentResolver.openInputStream(uri)) { "无法读取备份" }
+                                .bufferedReader(Charsets.UTF_8).use { it.readText() }
+                            AppBackup.decode(text)
+                        }
+                        AlertDialog.Builder(this@MainActivity).setTitle("恢复备份")
+                            .setMessage("备份含 ${backup.sources.size} 个片源、${backup.history.size} 条观看历史。\n将替换当前片源、历史、续播进度和设置，是否恢复？")
+                            .setNegativeButton("取消", null)
+                            .setPositiveButton("恢复") { _, _ ->
+                                val previousLimit = prefs.cacheLimitMb
+                                scope.launch {
+                                    val saved = withContext(Dispatchers.IO) { prefs.restoreBackup(backup) }
+                                    if (previousLimit != prefs.cacheLimitMb) PlaybackCache.recreate(this@MainActivity)
+                                    showSetup()
+                                    if (saved) toast("备份已恢复")
+                                    else AlertDialog.Builder(this@MainActivity).setTitle("备份已应用，但保存失败")
+                                        .setMessage("当前运行配置已恢复，尚未写入存储。请释放存储空间后重新恢复，以免重启后丢失。")
+                                        .setPositiveButton("确定", null).show()
+                                }
+                            }.show()
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    AlertDialog.Builder(this@MainActivity).setTitle("备份操作失败")
+                        .setMessage(error.message ?: "文件无法读取或格式不正确")
+                        .setPositiveButton("确定", null).show()
+                }
+            }
+            return
+        }
         if (requestCode != REQ_PICK_JSON || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
         runApi("读取文件…", {
@@ -913,6 +962,9 @@ class MainActivity : Activity() {
         col.addView(button("继续观看") { showHistoryCards() })
         col.addView(button("清理缓存") { showClearCache() })
         col.addView(button("首页按钮排序") { showHomeBarSettings() })
+        col.addView(button("导出备份") { exportBackupFile() })
+        col.addView(button("恢复备份") { pickBackupDocument(export = false) })
+        if (Build.VERSION.SDK_INT >= 29) col.addView(hintText("备份保存到“下载/LibreTV”，恢复前会确认替换。"))
         col.addView(button("上次搜索的片源状态") {
             val reports = api.lastReports
             AlertDialog.Builder(this).setTitle("片源状态")
@@ -923,6 +975,59 @@ class MainActivity : Activity() {
         })
         col.addView(button("返回首页") { showRecommend() })
         setScreen(ScrollView(this).apply { addView(col) })
+    }
+
+    private fun backupFileName(): String = "LibreTV-backup-" +
+        java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.ROOT).format(java.util.Date()) + ".json"
+
+    private fun exportBackupFile() {
+        if (Build.VERSION.SDK_INT < 29) { pickBackupDocument(export = true); return }
+        scope.launch {
+            try {
+                runInterruptible(Dispatchers.IO) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, backupFileName())
+                        put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/LibreTV/")
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+                    val uri = requireNotNull(contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)) {
+                        "无法创建备份文件"
+                    }
+                    var written = false
+                    try {
+                        requireNotNull(contentResolver.openOutputStream(uri, "w")) { "无法写入备份" }
+                            .bufferedWriter(Charsets.UTF_8).use { it.write(prefs.exportBackup()) }
+                        val published = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+                        check(contentResolver.update(uri, published, null, null) == 1) { "无法保存备份文件" }
+                        written = true
+                    } finally {
+                        if (!written) contentResolver.delete(uri, null, null)
+                    }
+                }
+                toast("备份已保存到 下载/LibreTV")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                AlertDialog.Builder(this@MainActivity).setTitle("导出备份失败")
+                    .setMessage(error.message ?: "无法写入备份文件").setPositiveButton("确定", null).show()
+            }
+        }
+    }
+
+    private fun pickBackupDocument(export: Boolean) {
+        val intent = Intent(if (export) Intent.ACTION_CREATE_DOCUMENT else Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/json"
+            if (export) putExtra(Intent.EXTRA_TITLE, backupFileName())
+        }
+        try {
+            startActivityForResult(intent, if (export) REQ_EXPORT_BACKUP else REQ_RESTORE_BACKUP)
+        } catch (_: android.content.ActivityNotFoundException) {
+            AlertDialog.Builder(this).setTitle("无法选择文件")
+                .setMessage("系统没有可用的文档选择器，请安装支持文档选择的文件管理器。")
+                .setPositiveButton("确定", null).show()
+        }
     }
 
     /** 设置页底部的项目主页：开源后方便别人找到仓库，不抢眼但有存在感 */
@@ -1227,6 +1332,7 @@ class MainActivity : Activity() {
                 4096 -> "4 GB"
                 else -> "2 GB"
             },
+            "下一集预缓存      ${if (prefs.nextEpisodePreloadEnabled) "开" else "关"}",
         )
 
         val listView = newList()
@@ -1258,6 +1364,9 @@ class MainActivity : Activity() {
                         toast("已设为 ${listOf("512 MB", "1 GB", "2 GB", "4 GB")[i]}，下次播放生效")
                         refresh()
                     }
+                    6 -> chooseOption("下一集预缓存", listOf("开", "关"),
+                        if (prefs.nextEpisodePreloadEnabled) 0 else 1
+                    ) { i -> prefs.nextEpisodePreloadEnabled = (i == 0); refresh() }
                 }
             })
         }
