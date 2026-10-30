@@ -2970,6 +2970,7 @@ class MainActivity : Activity() {
                 } else {
                     recommendItems = if (more) recommendItems + items else items
                     recommendPage = page
+                    noMoreRecommend = false
                     recommendFailedPage = -1
                     recommendTitle?.text = (if (tag == "综艺") "豆瓣 · 综艺"
                         else "豆瓣 · $tag · ${if (type == "tv") "剧集" else "电影"}") +

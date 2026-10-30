@@ -34,11 +34,21 @@
 
 ```powershell
 adb -s $serial shell am instrument -w -r -e mode regression -e case prefetch-page local.libretv.standalone.tv.test/com.dpadtv.client.NativeCmsInstrumentation
-# case: prefetch-initial / prefetch-covers / prefetch-page / prefetch-scope / prefetch-background / prefetch-retry
+# case: prefetch-initial / prefetch-covers / prefetch-page / prefetch-scope / prefetch-background / prefetch-retry / prefetch-empty-resume
 ```
 
 完整日志、偏好备份和截图保留在本地，不进入公开源码。
 
+## 后续修复：首批为空后的分页恢复
+
+2026-10-30，核对 dots 对固定提交 `fc64b6901c1330824c456bda9f88e4d42f378fb8` 的 P2 报告，并在 API 34 TV 模拟器复现：首次推荐为空，暂停／恢复后第一页返回 48 条，但旧的 `noMoreRecommend` 标记阻止继续分页。生产代码仅增加一行，在非空加载成功时将该标记重置为 `false`。
+
+新增 `prefetch-empty-resume` 场景复用现有本地 HTTP 夹具与真实 Activity：首批为空 → 调用暂停／恢复生命周期 → 返回 48 条 → 向下浏览后追加至 96 条。修改前明确失败于“Recovered first page did not resume pagination”，修改后通过。JVM 测试 60/60、推荐预加载模拟器场景 7/7 通过，包含原有六项；每项均检查偏好未变。
+
+本次没有增加版本号、发布新版本或部署 N5 Pro；上述修复的实机验收尚未执行。原文六项 N5 结果仍只对应发布的 0.1.8。
+
 ## English summary
 
 Version 0.1.8 silently fetches the next 48 recommendations roughly two viewports before the loaded boundary, appends to the existing grid, and warms up to two offscreen cover viewports (48 images maximum). One image warm-up shares the existing loader, dimensions and cache with visible cards. Navigation and lifecycle changes stop further prefetching; failed pages retain the list and can be retried with Down at the end. Validation includes 60 JVM tests, six emulator and six N5 fixture cases, three related regressions, a real 48-to-96-item recommendation browse on N5 and unchanged user preferences. It reduces waiting without promising zero stalls on slow networks.
+
+The 2026-10-30 follow-up confirms the dots P2 report against `fc64b6901c1330824c456bda9f88e4d42f378fb8`: an initially empty page left the end-of-list flag set after a successful foreground retry. A one-line reset on a non-empty response fixes pagination. The new `prefetch-empty-resume` regression failed before the fix and passed afterward, verifying 0 → pause/resume → 48 → 96 items. All 60 JVM tests and seven emulator prefetch cases passed, with unchanged preferences. This follow-up has no version bump, release or N5 deployment; its real-device acceptance is pending.

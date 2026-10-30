@@ -33,7 +33,7 @@ class NativeCmsInstrumentation : Instrumentation() {
                     "r4-unknown" -> SourcePickerProbe(this).run(unknownYear = true)
                     "r5" -> SearchBudgetProbe(this).run()
                     "r8" -> ImageLoadProbe(this).run()
-                    "prefetch-initial", "prefetch-covers", "prefetch-page", "prefetch-scope", "prefetch-background", "prefetch-retry" ->
+                    "prefetch-initial", "prefetch-covers", "prefetch-page", "prefetch-scope", "prefetch-background", "prefetch-retry", "prefetch-empty-resume" ->
                         RecommendPrefetchProbe(this).run(caseId)
                     else -> error("Unknown regression case: $caseId")
                 }

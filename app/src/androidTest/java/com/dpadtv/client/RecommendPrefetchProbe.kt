@@ -42,8 +42,9 @@ class RecommendPrefetchProbe(private val instrumentation: Instrumentation) {
                 }
                 val start = params.getValue("page_start").toInt()
                 if (start == 48 || caseId == "prefetch-initial") { requestedPage.countDown(); releasePage.await() }
+                val emptyFirstPage = caseId == "prefetch-empty-resume" && start == 0 && server.count("/subjects") == 1
                 val response = JSONObject().put("subjects", JSONArray().apply {
-                    repeat(if (start < 96) 48 else 0) { index ->
+                    repeat(if (start < 96 && !emptyFirstPage) 48 else 0) { index ->
                         put(JSONObject().put("title", "Fixture ${start + index}")
                             .put("cover", server.base + "/image/${start + index}.png").put("rate", "8.0"))
                     }
@@ -88,7 +89,7 @@ class RecommendPrefetchProbe(private val instrumentation: Instrumentation) {
                 field("api").set(activity, api)
                 loader = ImageLoader(api)
                 field("imageLoader").set(activity, loader)
-                field("recommendItems").set(activity, List(if (caseId == "prefetch-initial") 0 else 48) { index ->
+                field("recommendItems").set(activity, List(if (caseId in listOf("prefetch-initial", "prefetch-empty-resume")) 0 else 48) { index ->
                     DoubanItem("Fixture $index", server.base + "/image/$index.png", "8.0")
                 })
                 field("recommendPage").setInt(activity, 0)
@@ -106,6 +107,22 @@ class RecommendPrefetchProbe(private val instrumentation: Instrumentation) {
                 onMain { focused = grid().hasFocus() }
                 check(focused) { "Initial catalogue left focus on navigation instead of the poster grid" }
                 return JSONObject().put("case", caseId).put("initialItems", 48).put("gridFocused", true)
+            }
+            if (caseId == "prefetch-empty-resume") {
+                await("Initial empty page did not settle") {
+                    server.count("/subjects") == 1 && grid().adapter.count == 0 && !field("isLoadingMore").getBoolean(activity)
+                }
+                onMain {
+                    instrumentation.callActivityOnPause(activity)
+                    instrumentation.callActivityOnResume(activity)
+                }
+                await("First page did not recover on resume") { grid().adapter.count == 48 && grid().childCount > 0 }
+                onMain { grid().requestFocus(); grid().setSelection(24) }
+                check(requestedPage.await(5, TimeUnit.SECONDS)) { "Recovered first page did not resume pagination" }
+                releasePage.countDown()
+                await("Recovered catalogue did not append the next page") { grid().adapter.count == 96 }
+                return JSONObject().put("case", caseId).put("initialItems", 0)
+                    .put("resumedItems", 48).put("itemsAfterPagination", 96)
             }
             await("Fixture grid did not lay out") { grid().childCount > 0 && grid().lastVisiblePosition >= 6 }
             lateinit var originalGrid: GridView
