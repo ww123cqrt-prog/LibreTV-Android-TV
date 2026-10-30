@@ -21,6 +21,40 @@ class ImageLoader(private val api: Api) {
     private val pool = Executors.newFixedThreadPool(3)
     private val main = Handler(Looper.getMainLooper())
     private val inFlight = mutableMapOf<String, MutableList<(Bitmap?) -> Unit>>()
+    private val preloadQueue = ArrayDeque<String>()
+    private val preloadAttempted = mutableSetOf<String>()
+    private var preloadActive = false
+    private var preloadWidth = 0
+    private var preloadHeight = 0
+
+    /** Main-thread viewport queue; one warm-up leaves two workers for visible images. */
+    fun preload(urls: List<String>, reqWidth: Int, reqHeight: Int) {
+        val wanted = urls.filter { it.isNotEmpty() }.associateBy { "$it@${reqWidth}x$reqHeight" }
+        preloadAttempted.retainAll(wanted.keys)
+        preloadQueue.clear()
+        wanted.forEach { (key, url) ->
+            if (key !in preloadAttempted && cache.get(key) == null && key !in inFlight) preloadQueue.addLast(url)
+        }
+        preloadWidth = reqWidth
+        preloadHeight = reqHeight
+        preloadNext()
+    }
+
+    fun clearPreload() {
+        preloadQueue.clear()
+        preloadAttempted.clear()
+    }
+
+    private fun preloadNext() {
+        if (preloadActive || preloadQueue.isEmpty()) return
+        val url = preloadQueue.removeFirst()
+        preloadAttempted.add("$url@${preloadWidth}x$preloadHeight")
+        preloadActive = true
+        load(url, preloadWidth, preloadHeight) {
+            preloadActive = false
+            preloadNext()
+        }
+    }
 
     /** Called by UI bindings on the main thread. */
     fun load(url: String, reqWidth: Int, reqHeight: Int, onReady: (Bitmap?) -> Unit) {

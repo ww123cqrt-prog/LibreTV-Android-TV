@@ -6,11 +6,11 @@ This is a projector / Android TV adaptation based on DpadTV and LibreSpark/Libre
 
 应用名称为 **LibreTV**，仓库名为 **LibreTV-Android-TV**。本项目是社区适配版本，与两个上游项目没有官方发布关系。开发来源、固定提交和修改说明见 [NOTICE.md](NOTICE.md)。
 
-当前版本为 0.1.7，显示名称为 LibreTV，延续本适配版包名和开发签名。电影、剧集各有 10 个推荐标签；搜索结果按片名和年份合卡，详情页和播放器均可换源。目标是无需电脑的日常影视点播：推荐、全源搜索、选集、遥控播放和续播。直播、应用内更新等扩展功能已取消，不作为交付要求。
+当前版本为 0.1.8，显示名称为 LibreTV，延续本适配版包名和开发签名。电影、剧集各有 10 个推荐标签；搜索结果按片名和年份合卡，详情页和播放器均可换源。目标是无需电脑的日常影视点播：推荐、全源搜索、选集、遥控播放和续播。直播、应用内更新等扩展功能已取消，不作为交付要求。
 
 ## 安装与使用
 
-从 [Releases](https://github.com/ww123cqrt-prog/LibreTV-Android-TV/releases) 下载 APK。当前为 0.1.7 / versionCode 8 的调试预发布包，沿用已有开发签名。Android 最低要求为 6.0 / API 23，已测设备为坚果 N5 Pro（Android 14 / API 34，ARM64）；其他设备尚未逐一验收。
+从 [Releases](https://github.com/ww123cqrt-prog/LibreTV-Android-TV/releases) 下载 APK。当前为 0.1.8 / versionCode 9 的调试预发布包，沿用已有开发签名。Android 最低要求为 6.0 / API 23，已测设备为坚果 N5 Pro（Android 14 / API 34，ARM64）；其他设备尚未逐一验收。
 
 包名为 `local.libretv.standalone.tv`，与原版 `com.dpadtv.client` 并存，配置、历史和缓存分开保存。首次运行从 APK 内置文件载入 9 个可编辑的公开接口地址，以后不会覆盖手动修改；不读取其他应用的配置。这些第三方地址的可用性不由本项目保证，也不包含用户账号或登录凭据。
 
@@ -20,13 +20,15 @@ This is a projector / Android TV adaptation based on DpadTV and LibreSpark/Libre
 4. 播放时 OK 暂停或继续，左右快退或快进，下键打开操作栏，上键调整倍速，返回键退出播放。操作栏首项是“换源”：搜索结果到达后立即并行验证详情，先验证完成的来源先出现，其余继续补充。当前影片有年份而候选年份未知时，须等待完整搜索核对同名翻拍。选定后保留集数、时间和播放／暂停状态；缺少当前集则保留原播放，切换时首帧失败或等待超过 15 秒则尝试恢复原来源。
 5. “继续观看”读取本应用的历史和进度。“片源”提供添加、停用和测试；菜单键进入本地设置。
 
+首页接近已加载列表末尾前约两屏时，会静默读取下一批，并提前准备后约两屏的封面；追加到原海报墙，保留焦点与滚动位置。换分类、离开页面或进入后台后停止后续预读。预读失败保留当前列表，在末尾继续按下键即可重试。范围和测试见 [0.1.8 预加载记录](docs/recommend-prefetch-0.1.8.md)。
+
 片源仍需要互联网。封面、目录与视频分别请求各自的外部地址。App 不使用 `127.0.0.1:18080`，不需要 ADB reverse。
 
 也可通过已经连接的 ADB 安装，将示例中的设备序列号替换为 `adb devices` 列出的实际值。无线端口以当前设备状态为准：
 
 ```powershell
 $serial = 'YOUR_DEVICE_SERIAL'
-adb -s $serial install -r '.\LibreTV-0.1.7.apk'
+adb -s $serial install -r '.\LibreTV-0.1.8.apk'
 adb -s $serial shell am start -W -n local.libretv.standalone.tv/com.dpadtv.client.MainActivity
 ```
 
@@ -45,6 +47,7 @@ adb -s $serial shell am start -W -n local.libretv.standalone.tv/com.dpadtv.clien
 | HTML 详情、网页播放器解析、特殊源代理 | 未实现；没有直链时明确提示 |
 | 电影、剧集、综艺推荐及搜索热榜 | 已直连豆瓣；N5 每类48条，三类封面样本完整解码，海报墙显示通过 |
 | 上游电影、剧集推荐标签 | 0.1.4 新增各10个；N5 20个标签均返回48条，每类首张封面完整解码通过；详细范围见分类验收记录 |
+| 推荐下一批与封面预加载 | 0.1.8 新增；保留原网格、焦点和滚动位置，限制屏外下载；详见预加载记录 |
 | 手机扫码导入的局域网 HTTP 服务 | 已停用，可用文本、文件或 URL 导入 |
 | 真正关闭 Windows、投影仪重启、断网恢复、长时间连续播放 | 待实机验收 |
 

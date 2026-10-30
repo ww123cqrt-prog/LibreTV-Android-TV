@@ -72,9 +72,11 @@ class MainActivity : Activity() {
     private var recommendTag = "热门"
     private var isLoadingMore = false
     private var noMoreRecommend = false
-    private var suppressAutoLoad = false
-    private var pendingGridSelection = -1
-    private var lastVisibleIndex = 0
+    private var recommendJob: Job? = null
+    private var recommendGrid: GridView? = null
+    private var recommendTitle: TextView? = null
+    private var recommendFailedPage = -1
+    private var resumed = false
     private var liveGroupFilter = ""
     private var busyDialog: AlertDialog? = null
     /** 当前界面名，用于实现遥控器 BACK 的层级回退（否则任何界面按返回都会直接退出应用）。 */
@@ -234,11 +236,22 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        resumed = true
         hideSystemUi()
         if (returningFromPlayback) {
             returningFromPlayback = false
             if (currentScreen == "history") refreshHistoryCards?.invoke()
         }
+        if (currentScreen == "recommend") {
+            if (recommendItems.isEmpty() && !isLoadingMore) loadRecommend()
+            else recommendGrid?.post { prepareRecommend() }
+        }
+    }
+
+    override fun onPause() {
+        resumed = false
+        stopRecommendLoading()
+        super.onPause()
     }
 
     private fun hideSystemUi() {
@@ -314,6 +327,11 @@ class MainActivity : Activity() {
 
     private fun setScreen(view: View, focusFirst: Boolean = true) {
         if (currentScreen != "history") refreshHistoryCards = null
+        if (currentScreen != "recommend") {
+            stopRecommendLoading()
+            recommendGrid = null
+            recommendTitle = null
+        }
         root.removeAllViews()
         root.addView(view, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -461,7 +479,7 @@ class MainActivity : Activity() {
             // 网络挂住时不能把用户锁死在弹窗里（公共采集站经常超时）
             .setCancelable(true)
             .setOnCancelListener {
-                job?.cancel()
+                if (currentScreen == "recommend") stopRecommendLoading() else job?.cancel()
                 isLoadingMore = false
                 busyDialog = null
                 toast("已取消")
@@ -2763,6 +2781,8 @@ class MainActivity : Activity() {
 
     private fun showRecommend(focusTag: Boolean = false) {
         if (currentScreen == "results") job?.cancel()
+        stopRecommendLoading()
+        recommendFailedPage = -1
         currentScreen = "recommend"
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -2778,7 +2798,7 @@ class MainActivity : Activity() {
         )
         updateCapsule()?.let { brandBar.addView(it) }
         col.addView(brandBar)
-        col.addView(titleText(
+        recommendTitle = titleText(
             (when {
                 recommendTag == "综艺" -> "豆瓣 · 综艺"
                 mediaType == "tv" -> "豆瓣 · " + recommendTag + " · 剧集"
@@ -2786,7 +2806,8 @@ class MainActivity : Activity() {
             }) +
                 "  ·  第 ${recommendPage + 1} 批，共 ${recommendItems.size} 条",
             17f,
-        ))
+        )
+        col.addView(recommendTitle)
 
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val hiddenIds = prefs.homeBarHidden()
@@ -2819,8 +2840,6 @@ class MainActivity : Activity() {
                 recommendTag = tag
                 recommendItems = emptyList()
                 recommendPage = 0
-                pendingGridSelection = -1
-                lastVisibleIndex = 0
                 noMoreRecommend = false
                 isLoadingMore = false
                 showRecommend(focusTag = true)
@@ -2836,12 +2855,8 @@ class MainActivity : Activity() {
             verticalSpacing = dp(14)
             setPadding(0, dp(12), 0, 0)
         }
+        recommendGrid = grid
         grid.adapter = recommendAdapter()
-            if (pendingGridSelection >= 0) {
-                grid.setSelection(pendingGridSelection)
-                pendingGridSelection = -1
-                suppressAutoLoad = true
-            }
             grid.setOnScrollListener(object : android.widget.AbsListView.OnScrollListener {
                 override fun onScrollStateChanged(view: android.widget.AbsListView, state: Int) = Unit
                 override fun onScroll(
@@ -2850,17 +2865,7 @@ class MainActivity : Activity() {
                     visibleItemCount: Int,
                     totalItemCount: Int,
                 ) {
-                    lastVisibleIndex = firstVisibleItem
-                    if (suppressAutoLoad) {
-                        suppressAutoLoad = false
-                        return
-                    }
-                    // 滚到末尾前两行时自动加载下一批
-                    if (totalItemCount > 0 && !isLoadingMore && !noMoreRecommend &&
-                        firstVisibleItem + visibleItemCount >= totalItemCount - 2
-                    ) {
-                        loadRecommend(true)
-                    }
+                    if (view === recommendGrid) prepareRecommend()
                 }
             })
             // 顶部栏在 HorizontalScrollView 内，焦点搜索找不到下方网格，这里直接接管
@@ -2896,6 +2901,14 @@ class MainActivity : Activity() {
             }
             // 海报第一行向上回到当前分类，综艺页仍回到顶部导航。
             grid.setOnKeyListener { _, code, ev ->
+                if (code == KeyEvent.KEYCODE_DPAD_DOWN && ev.action == KeyEvent.ACTION_DOWN &&
+                    grid.selectedItemPosition >= recommendItems.size - grid.numColumns &&
+                    recommendFailedPage == recommendPage + 1
+                ) {
+                    recommendFailedPage = -1
+                    loadRecommend(true)
+                    return@setOnKeyListener true
+                }
                 if (code == android.view.KeyEvent.KEYCODE_DPAD_UP &&
                     ev.action == android.view.KeyEvent.ACTION_DOWN &&
                     grid.selectedItemPosition < grid.numColumns
@@ -2916,38 +2929,75 @@ class MainActivity : Activity() {
         setScreen(col)
         if (focusTag) selectedTag?.requestFocus() else grid.requestFocus()
         if (recommendItems.isEmpty()) loadRecommend(focusTag = focusTag)
+        else grid.post { prepareRecommend() }
+    }
+
+    private fun stopRecommendLoading() {
+        if (recommendJob != null) dismissProgress()
+        recommendJob?.cancel()
+        recommendJob = null
+        isLoadingMore = false
+        imageLoader.clearPreload()
+    }
+
+    private fun prepareRecommend() {
+        val grid = recommendGrid ?: return
+        if (!resumed || currentScreen != "recommend") return
+        val visible = grid.lastVisiblePosition - grid.firstVisiblePosition + 1
+        if (visible <= 0) return
+        val end = grid.lastVisiblePosition + 1
+        val coverEnd = minOf(recommendItems.size, end + minOf(visible * 2, 48))
+        imageLoader.preload(recommendItems.subList(end, coverEnd).map { it.cover }, dp(180), dp(260))
+        if (end + visible * 2 >= recommendItems.size && recommendItems.isNotEmpty() &&
+            !isLoadingMore && !noMoreRecommend && recommendFailedPage != recommendPage + 1
+        ) loadRecommend(true)
     }
 
     private fun loadRecommend(more: Boolean = false, focusTag: Boolean = false) {
-        if (more && (isLoadingMore || noMoreRecommend)) return
+        if (isLoadingMore || (more && noMoreRecommend)) return
         isLoadingMore = true
         val page = if (more) recommendPage + 1 else 0
-        runApi(if (more) "加载更多…" else "正在加载推荐…", {
-            runCatching { api.douban(mediaType, recommendTag, page * 48, 48) }
-        }, { result ->
-            isLoadingMore = false
-            val items = result.getOrElse { error ->
-                AlertDialog.Builder(this).setTitle("推荐加载失败")
-                    .setMessage(describe(error))
-                    .setPositiveButton("重试") { _, _ -> loadRecommend(more, focusTag) }
-                    .setNegativeButton("去搜索") { _, _ -> showHome() }.show()
-                return@runApi
-            }
-            if (items.isEmpty()) {
-                if (more) {
+        val type = mediaType
+        val tag = recommendTag
+        if (!more) progress("正在加载推荐…")
+        recommendJob = scope.launch {
+            try {
+                val items = runInterruptible(Dispatchers.IO) { api.douban(type, tag, page * 48, 48) }
+                if (!more) dismissProgress()
+                if (items.isEmpty()) {
                     noMoreRecommend = true
-                    toast("已经到底了")
+                    if (!more) toast("当前分类暂无推荐，可切换分类或搜索")
                 } else {
-                    toast("当前分类暂无推荐，可切换分类或搜索")
+                    recommendItems = if (more) recommendItems + items else items
+                    recommendPage = page
+                    recommendFailedPage = -1
+                    recommendTitle?.text = (if (tag == "综艺") "豆瓣 · 综艺"
+                        else "豆瓣 · $tag · ${if (type == "tv") "剧集" else "电影"}") +
+                        "  ·  第 ${page + 1} 批，共 ${recommendItems.size} 条"
+                    (recommendGrid?.adapter as? BaseAdapter)?.notifyDataSetChanged()
+                    if (!more && !focusTag) recommendGrid?.requestFocus()
                 }
-            } else {
-                recommendItems = if (more) recommendItems + items else items
-                recommendPage = page
-                // 追加时记住当前滚动位置，重建网格后回到原处，避免"跳回顶部"又触发加载
-                if (more) pendingGridSelection = lastVisibleIndex
-                showRecommend(focusTag)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (more) {
+                    recommendFailedPage = page
+                    toast("下一批暂未加载，列表末尾按下键重试")
+                } else {
+                    dismissProgress()
+                    AlertDialog.Builder(this@MainActivity).setTitle("推荐加载失败")
+                        .setMessage(describe(error))
+                        .setPositiveButton("重试") { _, _ -> loadRecommend(false, focusTag) }
+                        .setNegativeButton("去搜索") { _, _ -> showHome() }.show()
+                }
+            } finally {
+                if (recommendJob === coroutineContext.job) {
+                    recommendJob = null
+                    isLoadingMore = false
+                    recommendGrid?.post { prepareRecommend() }
+                }
             }
-        })
+        }
     }
 
     /** 海报网格：ImageView 复用时要校验 URL，否则快速滚动会串图。 */
