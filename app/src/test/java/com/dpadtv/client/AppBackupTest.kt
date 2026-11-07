@@ -41,6 +41,25 @@ class AppBackupTest {
         assertEquals(empty, AppBackup.decode(AppBackup.encode(empty)))
     }
 
+    @Test fun favoritesRoundTripWithFilmIdentityAndCover() {
+        val withFavorites = snapshot.copy(favorites = listOf(
+            FavoriteEntry("三体", "https://image.example/favorite.jpg", "2023", 1234),
+            FavoriteEntry("三体", "https://image.example/other.jpg", "2008", 5678),
+        ))
+        assertEquals(withFavorites, AppBackup.decode(AppBackup.encode(withFavorites)))
+    }
+
+    @Test fun oldVersionOneBackupWithoutFavoritesRemainsReadable() {
+        val old = JSONObject(AppBackup.encode(snapshot)).apply { remove("favorites") }
+        assertEquals(snapshot, AppBackup.decode(old.toString()))
+    }
+
+    @Test fun rejectsIncompleteFavoritesBeforeRestoringAnyData() {
+        val json = JSONObject(AppBackup.encode(snapshot)).put("favorites",
+            org.json.JSONArray().put(JSONObject().put("title", "")))
+        assertThrows(IllegalArgumentException::class.java) { AppBackup.decode(json.toString()) }
+    }
+
     @Test fun rejectsOtherApplicationsFilesAndFutureVersions() {
         val json = JSONObject(AppBackup.encode(snapshot))
         json.put("format", "LibreTV-Settings")

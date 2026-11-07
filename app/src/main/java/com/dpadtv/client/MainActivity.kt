@@ -33,6 +33,7 @@ import android.widget.LinearLayout
 import android.widget.GridView
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
+import android.widget.ImageButton
 import android.widget.ListView
 import android.widget.ScrollView
 import android.widget.TextView
@@ -87,6 +88,8 @@ class MainActivity : Activity() {
     private var busyDialog: AlertDialog? = null
     /** 当前界面名，用于实现遥控器 BACK 的层级回退（否则任何界面按返回都会直接退出应用）。 */
     private var currentScreen = "setup"
+    private var searchOrigin = "recommend"
+    private var activeHomeTab = "movie"
     /** 设置页是否展开「服务器连接」区块。已连接时默认收起（低频操作不占首屏） */
     private var setupShowFields = false
     private val REQ_PICK_JSON = 1001
@@ -262,16 +265,28 @@ class MainActivity : Activity() {
      */
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
+        if (currentScreen in setOf("recommend", "home", "favorites", "history", "setup") ||
+            (currentScreen == "sources" && sourcesOrigin == "home")) {
+            val bar = homeBar
+            if (bar != null && !bar.hasFocus()) {
+                (bar.findViewWithTag<View>(activeHomeTab) ?: bar.getChildAt(0))?.requestFocus()
+                return
+            }
+            super.onBackPressed()
+            return
+        }
         when (currentScreen) {
             "files" -> showSources()
             "qradd" -> { qrServer?.stop(); qrServer = null; showSources() }
-            "results" -> showRecommend()
+            "results" -> when (searchOrigin) {
+                "favorites" -> showFavorites()
+                "home" -> showHome()
+                else -> showRecommend()
+            }
             "serversettings" -> showSetup()
             "detail" -> { job?.cancel(); showResults(); resultsGrid.setSelection(resultSelection) }
-            "live", "setup", "history" -> showRecommend()
+            "live" -> showRecommend()
             "sources" -> if (sourcesOrigin == "setup") showSetup() else showRecommend()
-            "home" -> showRecommend()
-            "recommend" -> super.onBackPressed()
             // 导入流程内的页面：逐级退回上一级，而不是退出 App
             "input" -> showAddSource()
             "manualadd" -> showAddSource()
@@ -307,6 +322,7 @@ class MainActivity : Activity() {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun setScreen(view: View, focusFirst: Boolean = true) {
+        homeBar = view.findViewWithTag<LinearLayout>("home-nav")
         if (currentScreen != "history") refreshHistoryCards = null
         if (currentScreen != "recommend") {
             stopRecommendLoading()
@@ -367,6 +383,50 @@ class MainActivity : Activity() {
             setTextSize(size)
             setTextColor(TEXT_COLOR)
         }
+
+    /** All primary pages share the same compact TV navigation. */
+    private fun navigationHeader(active: String): LinearLayout {
+        activeHomeTab = active
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; tag = "home-nav"
+        }
+        val hidden = prefs.homeBarHidden()
+        for (id in prefs.homeBarOrder()) {
+            if (id in hidden) continue
+            val control: View = when (id) {
+                "movie", "tv", "show" -> button(HomeBar.label(id), primary = id == active) {
+                    selectRecommend(id, if (id == "show") "综艺" else "热门")
+                }
+                "search" -> iconButton("搜索", R.drawable.ic_search) { showHome() }
+                "favorites" -> button("收藏", primary = id == active) { showFavorites() }
+                "history" -> button("继续", primary = id == active) { showHistoryCards() }
+                "sources" -> button("片源", primary = id == active) { showSources(fromNavigation = true) }
+                "setup" -> iconButton("设置", R.drawable.ic_settings) { showSetup() }
+                else -> continue
+            }
+            control.tag = id
+            bar.addView(control)
+        }
+        updateCapsule()?.let { bar.addView(it) }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            addView(brandRow())
+            addView(hScroll(bar), LinearLayout.LayoutParams(0, -2, 1f))
+        }
+    }
+
+    private fun iconButton(label: String, icon: Int, onClick: () -> Unit): ImageButton = ImageButton(this).apply {
+        contentDescription = label
+        if (Build.VERSION.SDK_INT >= 26) tooltipText = label
+        setImageResource(icon)
+        imageTintList = android.content.res.ColorStateList.valueOf(TEXT_COLOR)
+        setPadding(dp(11), dp(11), dp(11), dp(11))
+        layoutParams = LinearLayout.LayoutParams(dp(46), dp(44))
+        setOnClickListener { onClick() }
+        applyFocusStyle(this, PANEL, focusedBg = ACCENT, onFocusChanged = { focused ->
+            imageTintList = android.content.res.ColorStateList.valueOf(if (focused) INK else TEXT_COLOR)
+        })
+    }
 
     private fun hintText(text: String): TextView =
         TextView(this).apply {
@@ -869,7 +929,7 @@ class MainActivity : Activity() {
                             AppBackup.decode(text)
                         }
                         AlertDialog.Builder(this@MainActivity).setTitle("恢复备份")
-                            .setMessage("备份含 ${backup.sources.size} 个片源、${backup.history.size} 条观看历史。\n将替换当前片源、历史、续播进度和设置，是否恢复？")
+                            .setMessage("备份含 ${backup.sources.size} 个片源、${backup.history.size} 条观看历史、${backup.favorites.size} 条收藏。\n将替换当前片源、收藏、历史、续播进度和设置，是否恢复？")
                             .setNegativeButton("取消", null)
                             .setPositiveButton("恢复") { _, _ ->
                                 val previousLimit = prefs.cacheLimitMb
@@ -924,29 +984,53 @@ class MainActivity : Activity() {
         currentScreen = "setup"
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(56), dp(36), dp(56), dp(36))
+            setPadding(dp(32), dp(18), dp(32), dp(20))
         }
-        col.addView(brandRow())
-        col.addView(hintText("版本 ${BuildConfig.VERSION_NAME} · 本机直连 · ${prefs.sources().size} 个片源"))
-        col.addView(hintText("推荐、搜索、选集与播放均由本机处理。"))
-        col.addView(button("片源管理", primary = true) { showSources() })
-        col.addView(button("播放设置") { showPlaySettings() })
-        col.addView(button("继续观看") { showHistoryCards() })
-        col.addView(button("清理缓存") { showClearCache() })
-        col.addView(button("首页按钮排序") { showHomeBarSettings() })
-        col.addView(button("导出备份") { exportBackupFile() })
-        col.addView(button("恢复备份") { pickBackupDocument(export = false) })
-        if (Build.VERSION.SDK_INT >= 29) col.addView(hintText("备份保存到“下载/LibreTV”，恢复前会确认替换。"))
-        col.addView(button("上次搜索的片源状态") {
+        col.addView(navigationHeader("setup"))
+        col.addView(titleText("设置", 25f).apply { setPadding(dp(4), dp(20), 0, dp(2)) })
+        col.addView(hintText("播放、片源与本地数据"))
+        val cards = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        fun tile(title: String, summary: String, action: () -> Unit): View = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL
+            isFocusable = true; isFocusableInTouchMode = true; isClickable = true
+            setPadding(dp(20), dp(16), dp(20), dp(16))
+            val heading = titleText(title, 18f).apply { typeface = Typeface.DEFAULT_BOLD }
+            val subtitle = hintText(summary).apply { textSize = 13f; setPadding(0, dp(7), 0, 0) }
+            addView(heading); addView(subtitle)
+            setOnClickListener { action() }
+            applyFocusStyle(this, PANEL, heading, focusedBg = ACCENT, onFocusChanged = { focused ->
+                subtitle.setTextColor(if (focused) INK else MUTED)
+            }, focusScale = 1.01f)
+        }
+        val controls = listOf(
+            tile("片源管理", "添加、导入与调整搜索来源") { showSources() },
+            tile("播放设置", "快进、连播、解码与缓存") { showPlaySettings() },
+            tile("首页导航", "调整按钮顺序与显示") { showHomeBarSettings() },
+            tile("导出备份", "保存片源、收藏与观看记录") { exportBackupFile() },
+            tile("恢复备份", "从之前的备份文件恢复") { pickBackupDocument(export = false) },
+            tile("清理缓存", "清理封面、播放缓存与历史") { showClearCache() },
+        )
+        controls.chunked(3).forEach { row ->
+            cards.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                row.forEach { addView(it, LinearLayout.LayoutParams(0, dp(100), 1f).apply {
+                    setMargins(0, 0, dp(8), dp(8))
+                }) }
+            })
+        }
+        col.addView(cards)
+        val status = button("查看片源状态") {
             val reports = api.lastReports
             AlertDialog.Builder(this).setTitle("片源状态")
                 .setMessage(if (reports.isEmpty()) "尚未搜索" else reports.joinToString("\n") {
                     "${it.name}：${if (it.ok) "${it.count} 条" else it.category} · ${it.ms} ms" +
                         if (it.failedPages.isEmpty()) "" else " · 第 ${it.failedPages.joinToString()} 页失败"
                 }).setPositiveButton("确定", null).show()
-        })
-        col.addView(button("返回首页") { showRecommend() })
-        setScreen(ScrollView(this).apply { addView(col) })
+        }
+        col.addView(status)
+        col.addView(hintText("LibreTV ${BuildConfig.VERSION_NAME}  ·  ${prefs.sources().size} 个片源  ·  备份位于 下载/LibreTV").apply { textSize = 12f })
+        setScreen(col)
+        controls.first().requestFocus()
     }
 
     private fun backupFileName(): String = "LibreTV-backup-" +
@@ -1272,44 +1356,62 @@ class MainActivity : Activity() {
 
     /** 单选弹窗（用全局对话框主题，和片源操作菜单同一套样式） */
     private fun chooseOption(title: String, options: List<String>, current: Int, onPick: (Int) -> Unit) {
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setSingleChoiceItems(options.toTypedArray(), current) { dialog, which ->
-                dialog.dismiss()
-                onPick(which)
-            }
-            .setNegativeButton("取消", null)
-            .show()
+        showTvChoices(title, options, current, onPick)
     }
     /** 播放设置：每项点开菜单选择，和全站弹窗风格一致 */
     private fun showPlaySettings() {
         currentScreen = "playsettings"
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(48), dp(24), dp(48), dp(20))
+            setPadding(dp(32), dp(18), dp(32), dp(20))
         }
-        col.addView(brandRow())
-        col.addView(titleText("播放设置", 20f))
+        col.addView(navigationHeader("setup"))
+        col.addView(titleText("播放设置", 24f).apply { setPadding(dp(4), dp(18), 0, 0) })
         col.addView(hintText("选中一条按 OK，在弹出的菜单里选择"))
 
-        fun rows(): List<String> = listOf(
-            "快进 / 快退步长    ${prefs.seekStepSeconds} 秒",
-            "自动连播下一集    ${if (prefs.autoNext) "开" else "关"}",
-            "记住播放进度      ${if (prefs.resumeEnabled) "开" else "关"}",
-            "续播起始位置      超过 ${prefs.resumeThresholdSeconds} 秒",
-            "解码方式          " + when (prefs.decodeMode) { 1 -> "强制软解"; 2 -> "强制硬解"; else -> "自动" },
-            "播放缓存上限      " + when (prefs.cacheLimitMb) {
+        fun rows(): List<Pair<String, String>> = listOf(
+            "快进 / 快退步长" to "${prefs.seekStepSeconds} 秒",
+            "自动连播下一集" to if (prefs.autoNext) "开" else "关",
+            "记住播放进度" to if (prefs.resumeEnabled) "开" else "关",
+            "续播起始位置" to "超过 ${prefs.resumeThresholdSeconds} 秒",
+            "解码方式" to when (prefs.decodeMode) { 1 -> "强制软解"; 2 -> "强制硬解"; else -> "自动" },
+            "播放缓存上限" to when (prefs.cacheLimitMb) {
                 512 -> "512 MB"
                 1024 -> "1 GB"
                 4096 -> "4 GB"
                 else -> "2 GB"
             },
-            "下一集预缓存      ${if (prefs.nextEpisodePreloadEnabled) "开" else "关"}",
+            "下一集预缓存" to if (prefs.nextEpisodePreloadEnabled) "开" else "关",
         )
 
         val listView = newList()
         fun refresh() {
-            bindList(listView, rows(), onItem = { idx ->
+            val values = rows()
+            val selected = listView.selectedItemPosition.coerceAtLeast(0)
+            listView.adapter = object : BaseAdapter() {
+                override fun getCount() = values.size
+                override fun getItem(position: Int) = values[position]
+                override fun getItemId(position: Int) = position.toLong()
+                override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                    val colors = android.content.res.ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_selected), intArrayOf()), intArrayOf(INK, TEXT_COLOR))
+                    val row = (convertView as? LinearLayout) ?: LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                        setPadding(dp(20), 0, dp(20), 0)
+                        setBackgroundResource(R.drawable.tv_choice_bg)
+                        addView(TextView(context).apply { textSize = 17f; setTextColor(colors) }, LinearLayout.LayoutParams(0, -2, 1f))
+                        addView(TextView(context).apply { textSize = 15f; setTextColor(colors) })
+                    }
+                    row.layoutParams = android.widget.AbsListView.LayoutParams(-1, dp(56))
+                    (row.getChildAt(0) as TextView).text = values[position].first
+                    (row.getChildAt(1) as TextView).text = values[position].second + "  ›"
+                    return row
+                }
+            }
+            listView.divider = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
+            listView.dividerHeight = dp(5)
+            listView.setSelection(selected)
+            listView.setOnItemClickListener { _, _, idx, _ ->
                 when (idx) {
                     0 -> chooseOption("快进 / 快退步长", listOf("10 秒", "15 秒", "30 秒"),
                         listOf(10, 15, 30).indexOf(prefs.seekStepSeconds).coerceAtLeast(0)
@@ -1340,7 +1442,7 @@ class MainActivity : Activity() {
                         if (prefs.nextEpisodePreloadEnabled) 0 else 1
                     ) { i -> prefs.nextEpisodePreloadEnabled = (i == 0); refresh() }
                 }
-            })
+            }
         }
         refresh()
         col.addView(listView, LinearLayout.LayoutParams(
@@ -1349,6 +1451,7 @@ class MainActivity : Activity() {
         bar.addView(button("返回设置") { showSetup() })
         col.addView(hScroll(bar))
         setScreen(col)
+        listView.requestFocus()
     }
     private fun showSetupCompact() {
         val col = LinearLayout(this).apply {
@@ -1450,18 +1553,18 @@ class MainActivity : Activity() {
     /* ------------------------------------------------------------- 片源管理 */
 
     /** 片源管理：列表为主，导入走独立页面；每条可编辑/停用/上移下移/测试/删除 */
-    private fun showSources() {
+    private fun showSources(fromNavigation: Boolean = false) {
         // 记录来源：从设置页进来的，返回时回设置；从首页进来的回首页
-        sourcesOrigin = if (currentScreen == "setup") "setup" else "home"
+        sourcesOrigin = if (!fromNavigation && currentScreen == "setup") "setup" else "home"
         currentScreen = "sources"
         val sources = prefs.sources()
         val enabledCount = sources.count { it.enabled }
 
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(40), dp(20), dp(40), dp(16))
+            setPadding(dp(32), dp(18), dp(32), dp(20))
         }
-        col.addView(brandRow())
+        col.addView(navigationHeader("sources"))
         col.addView(titleText("片源管理 · ${sources.size} 个（启用 $enabledCount）", 18f))
 
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -1562,6 +1665,7 @@ class MainActivity : Activity() {
         col.addView(listView, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setScreen(col)
+        listView.requestFocus()
     }
 
     /** 全部测试：并发探测启用中的源，结果写回 Prefs 供列表展示 */
@@ -2281,20 +2385,18 @@ class MainActivity : Activity() {
         currentScreen = "home"
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(48), dp(28), dp(48), dp(28))
+            setPadding(dp(32), dp(18), dp(32), dp(20))
         }
 
         val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        col.addView(brandRow())
+        col.addView(navigationHeader("search"))
+        col.addView(titleText("搜索", 24f).apply { setPadding(dp(4), dp(18), 0, dp(12)) })
         val keywordField = field("输入影片名称…")
         keywordField.imeOptions = EditorInfo.IME_ACTION_SEARCH
-        header.addView(keywordField, LinearLayout.LayoutParams(dp(580), dp(48)))
-        header.addView(button("搜索", primary = true) { doSearch(keywordField.text.toString()) })
-        header.addView(button("清空历史") { prefs.clearSearchHistory(); showHome() })
-        header.addView(button("片源") { showSources() })
-        header.addView(button("继续观看") { showHistoryCards() })
-        header.addView(button("设置") { showSetup() })
-        col.addView(hScroll(header))
+        header.addView(keywordField, LinearLayout.LayoutParams(0, dp(48), 1f))
+        header.addView(iconButton("开始搜索", R.drawable.ic_search) { doSearch(keywordField.text.toString()) })
+        header.addView(button("清空搜索记录") { prefs.clearSearchHistory(); showHome() })
+        col.addView(header)
 
         // 热门搜索：电影 / 剧集 / 综艺 各取排行榜前 10，点一下直接搜
         val hotRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -2343,6 +2445,7 @@ class MainActivity : Activity() {
         if (kw.isEmpty()) { toast("请输入片名"); return }
         val sources = prefs.sources().filter { it.enabled }
         if (sources.isEmpty()) { toast("没有启用的片源，去「片源管理」开启或添加"); showSources(); return }
+        if (currentScreen in setOf("recommend", "home", "favorites")) searchOrigin = currentScreen
         prefs.addSearchHistory(kw)
         job?.cancel()
         lastResults = emptyList()
@@ -2741,6 +2844,39 @@ class MainActivity : Activity() {
         setScreen(col)
     }
 
+    private fun showFavorites(selection: Int = 0) {
+        if (currentScreen == "results") job?.cancel()
+        currentScreen = "favorites"
+        val items = prefs.favorites()
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(32), dp(18), dp(32), dp(20))
+        }
+        col.addView(navigationHeader("favorites"))
+        col.addView(titleText("收藏 · ${items.size} 部", 24f).apply { setPadding(dp(4), dp(18), 0, 0) })
+        col.addView(hintText(if (items.isEmpty()) "在播放操作栏点亮星标，把想看的影片留在这里。"
+            else "确认搜索全部片源  ·  长按取消收藏"))
+        if (items.isEmpty()) {
+            val discover = button("去发现影片") { showRecommend() }
+            col.addView(discover)
+            setScreen(col)
+            discover.requestFocus()
+        } else {
+            val posters = items.map { DoubanItem(it.title + if (it.year.isNotEmpty()) " (${it.year})" else "", it.cover, "") }
+            val grid = newGrid().apply {
+                numColumns = 6; horizontalSpacing = dp(10); verticalSpacing = dp(10)
+                val width = (resources.displayMetrics.widthPixels - dp(64 + 50)) / 6 - dp(8)
+                adapter = posterAdapter(width * 3 / 2) { posters }
+                setOnItemClickListener { _, _, position, _ -> doSearch(items[position].title) }
+                setOnItemLongClickListener { _, _, position, _ ->
+                    prefs.removeFavorite(items[position]); showFavorites(position); true
+                }
+            }
+            col.addView(grid, LinearLayout.LayoutParams(-1, 0, 1f))
+            setScreen(col)
+            grid.requestFocus(); grid.setSelection(selection.coerceIn(0, items.lastIndex))
+        }
+    }
+
     /** 继续观看：卡片形式（封面 + 片名 + 进度） */
     private fun showHistoryCards() {
         refreshHistoryCards = null
@@ -2769,13 +2905,12 @@ class MainActivity : Activity() {
         val items2 = prefs.history()
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(40), dp(20), dp(40), dp(16))
+            setPadding(dp(32), dp(18), dp(32), dp(20))
         }
-        col.addView(brandRow())
+        col.addView(navigationHeader("history"))
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val historyCount = titleText("继续观看 · ${items2.size} 条", 18f)
         bar.addView(historyCount)
-        bar.addView(button("返回搜索") { showRecommend() })
         if (items2.isNotEmpty()) {
             bar.addView(button("清空历史") { prefs.clearHistory(); toast("已清空"); showHistoryCards() })
         }
@@ -2859,6 +2994,7 @@ class MainActivity : Activity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         }
         setScreen(col)
+        (col.getChildAt(col.childCount - 1) as? GridView)?.requestFocus()
         col.post { col.findFocus() ?: col.requestFocus() }
     }
     private fun formatTime(ms: Long): String {
@@ -2899,34 +3035,11 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(32), dp(18), dp(32), dp(12))
         }
-        val brandBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
         val ranking = HomeRanking.entries.firstOrNull { it.label == recommendTag }
-        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val hiddenIds = prefs.homeBarHidden()
-        var activeMedia: Button? = null
-        for (id in prefs.homeBarOrder()) {
-            if (hiddenIds.contains(id)) continue
-            val control = when (id) {
-                "movie", "tv", "show" -> button(HomeBar.label(id), primary = id == mediaType && ranking == null) {
-                    selectRecommend(id, if (id == "show") "综艺" else "热门")
-                }
-                "search" -> button("搜索") { showHome() }
-                "history" -> button("继续") { showHistoryCards() }
-                "sources" -> button("片源") { showSources() }
-                "setup" -> button("设置") { showSetup() }
-                else -> continue
-            }
-            bar.addView(control)
-            if (id == mediaType) activeMedia = control
-        }
-        updateCapsule()?.let { bar.addView(it) }
-        brandBar.addView(brandRow())
-        brandBar.addView(hScroll(bar), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val brandBar = navigationHeader(mediaType)
+        val bar = brandBar.findViewWithTag<LinearLayout>("home-nav")
+        val activeMedia = bar.findViewWithTag<View>(mediaType)
         col.addView(brandBar)
-        homeBar = bar
 
         // Keep the existing filters and use the same poster grid for both finite rankings.
         val tags = when (mediaType) {
@@ -2964,7 +3077,7 @@ class MainActivity : Activity() {
             setPadding(0, dp(6), 0, 0)
         }
         recommendGrid = grid
-        grid.adapter = recommendAdapter(posterWidth * 3 / 2)
+        grid.adapter = posterAdapter(posterWidth * 3 / 2) { recommendItems }
             grid.setOnScrollListener(object : android.widget.AbsListView.OnScrollListener {
                 override fun onScrollStateChanged(view: android.widget.AbsListView, state: Int) = Unit
                 override fun onScroll(
@@ -3119,9 +3232,9 @@ class MainActivity : Activity() {
     }
 
     /** 海报网格：ImageView 复用时要校验 URL，否则快速滚动会串图。 */
-    private fun recommendAdapter(posterHeight: Int): BaseAdapter = object : BaseAdapter() {
-        override fun getCount() = recommendItems.size
-        override fun getItem(position: Int): Any = recommendItems[position]
+    private fun posterAdapter(posterHeight: Int, items: () -> List<DoubanItem>): BaseAdapter = object : BaseAdapter() {
+        override fun getCount() = items().size
+        override fun getItem(position: Int): Any = items()[position]
         override fun getItemId(position: Int) = position.toLong()
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
@@ -3150,7 +3263,7 @@ class MainActivity : Activity() {
                     },
                 )
             }
-            val item = recommendItems[position]
+            val item = items()[position]
             val img = cell.getChildAt(0) as ImageView
             val label = cell.getChildAt(1) as TextView
             label.text = if (item.rating.isEmpty()) item.title else "${item.title}  ★${item.rating}"

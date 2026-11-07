@@ -22,6 +22,7 @@ data class BackupSnapshot(
     val history: List<HistoryEntry>,
     val positions: Map<String, Long>,
     val settings: BackupSettings,
+    val favorites: List<FavoriteEntry> = emptyList(),
 )
 
 /** Native app format; deliberately separate from the web app's incompatible history schema. */
@@ -32,6 +33,7 @@ object AppBackup {
         put("createdAt", System.currentTimeMillis())
         put("sources", JSONArray().apply { snapshot.sources.forEach { put(it.toJson()) } })
         put("history", JSONArray().apply { snapshot.history.forEach { put(it.toJson()) } })
+        put("favorites", JSONArray().apply { snapshot.favorites.forEach { put(it.toJson()) } })
         put("positions", JSONObject(snapshot.positions))
         val s = snapshot.settings
         put("settings", JSONObject().put("seekStepSeconds", s.seekStepSeconds).put("autoNext", s.autoNext)
@@ -77,6 +79,9 @@ object AppBackup {
         require(settings.seekStepSeconds > 0 && settings.resumeThresholdSeconds >= 0 &&
             settings.playbackSpeed.isFinite() && settings.playbackSpeed in 0.25f..4f &&
             settings.decodeMode in 0..2 && settings.cacheLimitMb in 1..4096) { "备份中的播放设置无效" }
-        return BackupSnapshot(sources, history, positions, settings)
+        val favorites = if (root.has("favorites")) root.getJSONArray("favorites").let { rows ->
+            List(rows.length()) { FavoriteEntry.fromJson(rows.getJSONObject(it)) }
+        } else emptyList()
+        return BackupSnapshot(sources, history, positions, settings, favorites)
     }
 }

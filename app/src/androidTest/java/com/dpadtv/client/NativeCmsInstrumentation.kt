@@ -27,6 +27,10 @@ class NativeCmsInstrumentation : Instrumentation() {
             if (options.getString("mode") == "regression") {
                 val caseId = options.getString("case").orEmpty()
                 val result = when (caseId) {
+                    "tv-dialogs" -> TvUiProbe(this).dialogs()
+                    "tv-navigation" -> TvUiProbe(this).navigation()
+                    "tv-favorites" -> TvUiProbe(this).favorites()
+                    "tv-favorites-history" -> TvUiProbe(this).favorites(legacyHistory = true)
                     "r1", "r1-seek", "r7", "history-next" -> MainHistoryProbe(this).run(caseId)
                     "r2", "r3" -> PlaybackLifecycleProbe(this).run(caseId)
                     "r4" -> SourcePickerProbe(this).run()

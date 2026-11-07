@@ -93,6 +93,8 @@ class PlayerActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var sourceAction: TextView
     private lateinit var episodeAction: TextView
+    private lateinit var favoriteAction: TextView
+    private var favoriteYear = ""
     private var episodeDialog: AlertDialog? = null
     private val sourceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val sourceDispatcher = Dispatchers.IO.limitedParallelism(4)
@@ -194,6 +196,7 @@ class PlayerActivity : Activity() {
         val legacy = PlaybackSourceRules.historyIdentity(seriesTitle)
         historyNeedsPlaylist = intent.getBooleanExtra(EXTRA_FROM_HISTORY, false)
         searchTitle = intent.getStringExtra(EXTRA_SEARCH_TITLE) ?: legacy.title
+        favoriteYear = intent.getStringExtra(EXTRA_YEAR).orEmpty()
         if (urls.size == 1 && (historyNeedsPlaylist || !intent.hasExtra(EXTRA_SEARCH_TITLE))) {
             historyEpisodeIndex = legacy.episodeIndex
         }
@@ -300,6 +303,15 @@ class PlayerActivity : Activity() {
         episodeAction = actionButton("选集") { showEpisodePicker() }
         actionBar.addView(episodeAction)
         updateEpisodeAction()
+        favoriteAction = actionButton("收藏") {
+            val added = prefs.toggleFavorite(FavoriteEntry(searchTitle, coverUrl, favoriteYear, System.currentTimeMillis()))
+            updateFavoriteAction()
+            toast(if (added) "已加入收藏" else "已取消收藏")
+            showActions()
+        }
+        favoriteAction.isEnabled = searchTitle.isNotBlank()
+        actionBar.addView(favoriteAction)
+        updateFavoriteAction()
         actionBar.addView(actionButton("下集") {
             seekToNextEpisode()
             showActions()
@@ -544,6 +556,17 @@ class PlayerActivity : Activity() {
             val alreadyEnded = p.playbackState == Player.STATE_ENDED
             historyNeedsPlaylist = false
             currentSource = source
+            if (favoriteYear.isEmpty() && source.year.isNotEmpty()) {
+                val earlyFavorite = prefs.favorites().firstOrNull { it.title == searchTitle && it.year.isEmpty() }
+                favoriteYear = source.year
+                if (earlyFavorite != null) {
+                    prefs.removeFavorite(earlyFavorite)
+                    if (!prefs.isFavorite(searchTitle, favoriteYear)) {
+                        prefs.toggleFavorite(earlyFavorite.copy(year = favoriteYear))
+                    }
+                }
+                updateFavoriteAction()
+            }
             seriesTitle = title
             urls = episodes
             historyEpisodeIndex = 0
@@ -945,47 +968,46 @@ class PlayerActivity : Activity() {
         val cur = speeds.indexOfFirst {
             kotlin.math.abs(it - (player?.playbackParameters?.speed ?: 1f)) < 0.01f
         }
-        android.app.AlertDialog.Builder(this)
-            .setTitle("播放倍速")
-            .setSingleChoiceItems(labels.toTypedArray(), cur.coerceAtLeast(-1)) { d, which ->
+        showTvChoices("播放倍速", labels, cur) { which ->
                 player?.setPlaybackSpeed(speeds[which])
                 prefs.playbackSpeed = speeds[which]
                 updateSpeedAction()
-                d.dismiss()
                 showProgress()
-            }
-            .setNegativeButton("取消", null)
-            .show()
+        }
     }
 
     private fun showDecodeMenu() {
         val names = arrayOf("自动（推荐）", "强制软解", "强制硬解")
-        android.app.AlertDialog.Builder(this)
-            .setTitle("解码方式（下次打开视频生效）")
-            .setSingleChoiceItems(names, prefs.decodeMode.coerceIn(0, 2)) { d, which ->
+        showTvChoices("解码方式（下次打开视频生效）", names.toList(), prefs.decodeMode.coerceIn(0, 2)) { which ->
                 prefs.decodeMode = which
-                d.dismiss()
                 toast("已设为：${names[which]}，重新打开视频生效")
-            }
-            .setNegativeButton("取消", null)
-            .show()
+        }
     }
 
     private fun showAspectMenu() {
         val names = arrayOf("适应屏幕", "裁切铺满", "拉伸铺满")
-        android.app.AlertDialog.Builder(this)
-            .setTitle("显示比例")
-            .setSingleChoiceItems(names, aspectMode) { d, which ->
+        showTvChoices("显示比例", names.toList(), aspectMode) { which ->
                 aspectMode = which
                 playerView.resizeMode = when (which) {
                     1 -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                     2 -> AspectRatioFrameLayout.RESIZE_MODE_FILL
                     else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
                 }
-                d.dismiss()
-            }
-            .setNegativeButton("取消", null)
-            .show()
+        }
+    }
+
+    private fun updateFavoriteAction() {
+        val saved = prefs.isFavorite(searchTitle, favoriteYear)
+        favoriteAction.text = if (saved) "已收藏" else "收藏"
+        favoriteAction.contentDescription = if (saved) "取消收藏" else "加入收藏"
+        favoriteAction.compoundDrawablePadding = dp(7)
+        val icon = getDrawable(if (saved) R.drawable.ic_star else R.drawable.ic_star_outline)?.mutate()?.apply {
+            setTintList(android.content.res.ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_focused), intArrayOf()),
+                intArrayOf(0xFF111C20.toInt(), 0xFFEDF0F6.toInt())))
+            setBounds(0, 0, dp(19), dp(19))
+        }
+        favoriteAction.setCompoundDrawablesRelative(icon, null, null, null)
     }
 
     /** 解码方式：0 自动 / 1 强制软解 / 2 强制硬解 */

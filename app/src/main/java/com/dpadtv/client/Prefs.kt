@@ -37,6 +37,20 @@ data class HistorySource(val url: String, val vodId: String, val title: String, 
     }
 }
 
+/** 收藏整部影片／剧集，不绑定容易失效的播放地址或某一集。 */
+data class FavoriteEntry(val title: String, val cover: String, val year: String, val addedAt: Long) {
+    fun toJson(): JSONObject = JSONObject().put("title", title).put("cover", cover)
+        .put("year", year).put("addedAt", addedAt)
+
+    companion object {
+        fun fromJson(json: JSONObject): FavoriteEntry {
+            val title = json.getString("title").trim()
+            require(title.isNotEmpty()) { "收藏片名为空" }
+            return FavoriteEntry(title, json.getString("cover"), json.getString("year"), json.getLong("addedAt"))
+        }
+    }
+}
+
 /** 本地配置：服务器、会话 Cookie、片源列表。全部存在应用私有 SharedPreferences。 */
 class Prefs(ctx: Context) {
 
@@ -197,6 +211,30 @@ class Prefs(ctx: Context) {
         sp.edit().remove("history").apply()
     }
 
+    fun favorites(): List<FavoriteEntry> = runCatching {
+        val rows = JSONArray(sp.getString("favorites", "[]"))
+        List(rows.length()) { FavoriteEntry.fromJson(rows.getJSONObject(it)) }
+    }.getOrDefault(emptyList())
+
+    fun isFavorite(title: String, year: String): Boolean =
+        favorites().any { it.title == title && it.year == year }
+
+    fun toggleFavorite(entry: FavoriteEntry): Boolean {
+        val rows = favorites().toMutableList()
+        val removed = rows.removeAll { it.title == entry.title && it.year == entry.year }
+        if (!removed) rows.add(0, entry)
+        saveFavorites(rows)
+        return !removed
+    }
+
+    fun removeFavorite(entry: FavoriteEntry) {
+        saveFavorites(favorites().filterNot { it.title == entry.title && it.year == entry.year })
+    }
+
+    private fun saveFavorites(rows: List<FavoriteEntry>) {
+        sp.edit().putString("favorites", JSONArray().apply { rows.forEach { put(it.toJson()) } }.toString()).apply()
+    }
+
     /* ------------------------------------------------------------- 播放设置 */
 
     /** 快进/快退步长（秒） */
@@ -279,6 +317,7 @@ class Prefs(ctx: Context) {
         sp.all.filterKeys { it.startsWith("pos:") }.mapValues { (_, value) -> value as Long },
         BackupSettings(seekStepSeconds, autoNext, resumeEnabled, resumeThresholdSeconds, playbackSpeed,
             decodeMode, cacheLimitMb, nextEpisodePreloadEnabled, homeBarOrder(), homeBarHidden(), searchHistory()),
+        favorites(),
     ))
 
     /** The UI supplies an already parsed snapshot. One editor keeps related values together. */
@@ -288,8 +327,10 @@ class Prefs(ctx: Context) {
         backup.positions.forEach { (key, value) -> editor.putLong(key, value) }
         val sources = JSONArray().apply { backup.sources.forEach { put(it.toJson()) } }
         val history = JSONArray().apply { backup.history.forEach { put(it.toJson()) } }
+        val favorites = JSONArray().apply { backup.favorites.forEach { put(it.toJson()) } }
         val s = backup.settings
         return editor.putString("sources", sources.toString()).putString("history", history.toString())
+            .putString("favorites", favorites.toString())
             .putBoolean("native_sources_initialized", true)
             .putInt("seek_step", s.seekStepSeconds).putBoolean("auto_next", s.autoNext)
             .putBoolean("resume_enabled", s.resumeEnabled).putInt("resume_threshold", s.resumeThresholdSeconds)
@@ -303,7 +344,10 @@ class Prefs(ctx: Context) {
     fun homeBarOrder(): MutableList<String> {
         val text = sp.getString("home_bar_order", "") ?: ""
         if (text.isEmpty()) return HomeBar.DEFAULT.toMutableList()
-        return text.split(',').filter { it.isNotEmpty() }.toMutableList()
+        return text.split(',').filter { it.isNotEmpty() }.toMutableList().apply {
+            // 旧用户保留原排序，只把新入口补到「继续」左边。
+            if ("favorites" !in this) add(indexOf("history").takeIf { it >= 0 } ?: size, "favorites")
+        }
     }
 
     fun saveHomeBarOrder(list: List<String>) {
@@ -347,7 +391,7 @@ class Prefs(ctx: Context) {
 }
 
 object HomeBar {
-    val DEFAULT = listOf("movie", "tv", "show", "search", "history", "sources", "setup")
+    val DEFAULT = listOf("movie", "tv", "show", "search", "favorites", "history", "sources", "setup")
 
     fun label(id: String): String = when (id) {
         "movie" -> "电影"
@@ -356,6 +400,7 @@ object HomeBar {
         "search" -> "搜索"
         "live" -> "直播"
         "history" -> "继续"
+        "favorites" -> "收藏"
         "sources" -> "片源"
         "setup" -> "设置"
         else -> id
