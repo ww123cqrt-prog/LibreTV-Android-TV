@@ -92,6 +92,8 @@ class PlayerActivity : Activity() {
     private lateinit var actionScroll: HorizontalScrollView
     private lateinit var prefs: Prefs
     private lateinit var sourceAction: TextView
+    private lateinit var episodeAction: TextView
+    private var episodeDialog: AlertDialog? = null
     private val sourceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val sourceDispatcher = Dispatchers.IO.limitedParallelism(4)
     private var sourceJob: Job? = null
@@ -113,6 +115,7 @@ class PlayerActivity : Activity() {
     private var baseText = ""
     private var pendingSeek = -1L
     private var hasError = false
+    private var recoveryOfferedForUrl = ""
     private var aspectMode = 0
     private var videoFrameRendered = false
     private var foreground = false
@@ -294,6 +297,9 @@ class PlayerActivity : Activity() {
         actionBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         sourceAction = actionButton("换源") { showSourcePicker() }
         actionBar.addView(sourceAction)
+        episodeAction = actionButton("选集") { showEpisodePicker() }
+        actionBar.addView(episodeAction)
+        updateEpisodeAction()
         actionBar.addView(actionButton("下集") {
             seekToNextEpisode()
             showActions()
@@ -307,6 +313,7 @@ class PlayerActivity : Activity() {
             showActions()
         })
         actionBar.addView(actionButton("刷新") {
+            recoveryOfferedForUrl = ""
             player?.let {
                 it.seekTo(currentIndex, it.currentPosition)
                 it.prepare()
@@ -419,6 +426,7 @@ class PlayerActivity : Activity() {
                         handler.removeCallbacks(clearPendingSeek)
                         currentIndex = exo.currentMediaItemIndex
                         hasError = false
+                        updateEpisodeAction()
                         baseText = playbackLabel()
                         if (!hasError) {
                             titleText.text = baseText
@@ -479,6 +487,7 @@ class PlayerActivity : Activity() {
                         bufferingText.visibility = View.GONE
                         speedText.visibility = View.GONE
                         updateChrome()
+                        offerSourceRecovery()
                     }
 
                     override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -487,14 +496,21 @@ class PlayerActivity : Activity() {
 
                     override fun onRenderedFirstFrame() {
                         videoFrameRendered = true
+                        hasError = false
+                        baseText = playbackLabel()
+                        titleText.text = baseText
+                        titleText.setTextColor(0xFFCBD5E1.toInt())
+                        recoveryOfferedForUrl = ""
                         showResolution(exo.videoSize)
                         if (sourceBackup != null) {
                             historyNeedsPlaylist = false
+                            updateEpisodeAction()
                             sourceBackup = null
                             handler.removeCallbacks(sourceTimeout)
                             sourceAction.isEnabled = true
                             toast("已切换到 ${currentSource?.sourceName} · 第 ${currentIndex + 1} 集")
                         }
+                        updateChrome()
                         updateNextEpisodePrefetch()
                     }
                 })
@@ -531,6 +547,7 @@ class PlayerActivity : Activity() {
             seriesTitle = title
             urls = episodes
             historyEpisodeIndex = 0
+            updateEpisodeAction()
             // Keep the already playing MediaItem so adding the other episodes does not restart it.
             if (index > 0) p.addMediaItems(0, episodes.take(index).map(MediaItem::fromUri))
             p.addMediaItems(episodes.drop(index + 1).map(MediaItem::fromUri))
@@ -586,7 +603,53 @@ class PlayerActivity : Activity() {
 
     /* ------------------------------------------------------------ 播放中换源 */
 
+    private fun updateEpisodeAction() {
+        episodeAction.visibility = if (urls.size > 1 || historyNeedsPlaylist) View.VISIBLE else View.GONE
+    }
+
+    private fun showEpisodePicker() {
+        if (sourceBackup != null) { toast("正在换源，请稍候"); return }
+        if (historyNeedsPlaylist && urls.size == 1) {
+            toast(if (historyPlaylistJob?.isActive == true) "正在恢复集数，请稍候" else "暂时无法确认这条记录的集数，可尝试换源")
+            return
+        }
+        val p = player ?: return
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("选集 · 共 ${urls.size} 集")
+            .setSingleChoiceItems(Array(urls.size) { "第 ${it + 1} 集" }, p.currentMediaItemIndex) { d, index ->
+                if (index != p.currentMediaItemIndex) {
+                    persistProgress()
+                    p.seekTo(index, 0L)
+                }
+                if (p.playbackState == Player.STATE_IDLE) p.prepare()
+                d.dismiss()
+                showProgress()
+            }
+            .setNegativeButton("取消", null)
+            .create()
+        episodeDialog = dialog
+        dialog.setOnDismissListener { episodeDialog = null }
+        dialog.show()
+        dialog.listView.setSelection(p.currentMediaItemIndex)
+        dialog.listView.requestFocus()
+    }
+
+    /** Offer replacement sources only when Media3 reports a terminal error. */
+    private fun offerSourceRecovery() {
+        if (!foreground || player?.playerError == null || isFinishing || isDestroyed) return
+        val url = currentUrl()
+        if (url == recoveryOfferedForUrl) return
+        if (sourceJob?.isActive == true || sourceDialog?.isShowing == true) {
+            recoveryOfferedForUrl = url
+            return
+        }
+        if (!hasWindowFocus()) return
+        recoveryOfferedForUrl = url
+        showSourcePicker()
+    }
+
     private fun showSourcePicker() {
+        if (hasError) recoveryOfferedForUrl = currentUrl()
         if (searchTitle.isBlank()) { toast("缺少片名，无法查找其他来源"); return }
         val sources = prefs.sources().filter { it.enabled }
         if (sources.isEmpty()) { toast("没有启用的片源，请先到片源管理开启"); return }
@@ -684,6 +747,7 @@ class PlayerActivity : Activity() {
         sourceBackup = previous
         sourceAction.isEnabled = false
         urls = candidate.detail.episodes
+        updateEpisodeAction()
         currentSource = candidate.item
         seriesTitle = candidate.item.name.trim()
         coverUrl = candidate.detail.info.cover.ifEmpty { coverUrl }
@@ -704,6 +768,7 @@ class PlayerActivity : Activity() {
         handler.removeCallbacks(sourceTimeout)
         sourceAction.isEnabled = true
         urls = previous.urls
+        updateEpisodeAction()
         currentSource = previous.source
         seriesTitle = previous.title
         coverUrl = previous.cover
@@ -1111,6 +1176,12 @@ class PlayerActivity : Activity() {
         super.onResume()
         foreground = true
         updateNextEpisodePrefetch()
+        offerSourceRecovery()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) offerSourceRecovery()
     }
 
     override fun onPause() {
@@ -1124,6 +1195,7 @@ class PlayerActivity : Activity() {
         super.onStop()
         sourceJob?.cancel()
         sourceDialog?.dismiss()
+        episodeDialog?.dismiss()
         restoreSource(null, playWhenReady = false)
         handler.removeCallbacks(saveTick)
         player?.pause()

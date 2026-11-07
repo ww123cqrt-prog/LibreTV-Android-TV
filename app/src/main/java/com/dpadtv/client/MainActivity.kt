@@ -2881,6 +2881,8 @@ class MainActivity : Activity() {
     private fun recommendHeading(ranking: HomeRanking?): String = when (ranking) {
         HomeRanking.MOVIE_WEEKLY -> "电影周榜  ·  豆瓣"
         HomeRanking.TV_POPULAR -> "热门剧榜  ·  百度"
+        HomeRanking.TV_CHINESE -> "国产剧周榜  ·  豆瓣"
+        HomeRanking.TV_GLOBAL -> "海外剧周榜  ·  豆瓣"
         null -> when (mediaType) {
             "tv" -> "剧集  ·  $recommendTag"
             "show" -> "综艺推荐"
@@ -2934,7 +2936,9 @@ class MainActivity : Activity() {
         }
         val tagBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         var selectedTag: Button? = null
-        val choices = tags.take(1) + HomeRanking.entries.map { it.label } + tags.drop(1)
+        val rankings = if (mediaType == "tv") HomeRanking.entries.toList()
+            else listOf(HomeRanking.MOVIE_WEEKLY, HomeRanking.TV_POPULAR)
+        val choices = tags.take(1) + rankings.map { it.label } + tags.drop(1)
         for (tag in choices) {
             val tagButton = button(if (mediaType == "show" && tag == "综艺") "全部" else tag, primary = tag == recommendTag) {
                 if (tag != recommendTag) selectRecommend(mediaType, tag, focusTag = true)

@@ -107,6 +107,8 @@ data class DoubanItem(val title: String, val cover: String, val rating: String)
 internal enum class HomeRanking(val label: String, val path: String) {
     MOVIE_WEEKLY("电影周榜", "/v2/douban/weekly/movie"),
     TV_POPULAR("热门剧榜", "/v2/baidu/teleplay"),
+    TV_CHINESE("国产剧周榜", "/v2/douban/weekly/tv_chinese"),
+    TV_GLOBAL("海外剧周榜", "/v2/douban/weekly/tv_global"),
 }
 
 data class SearchResult(val items: List<SearchItem>, val failures: Int, val reports: List<CmsSourceReport> = emptyList())
@@ -202,7 +204,7 @@ class Api(
                         .ifBlank { (item.opt("cover_proxy") as? String).orEmpty() }
                     if (title.isBlank() || cover.isBlank()) return@mapNotNull null
                     val rating = item.optString("rating").takeIf {
-                        ranking == HomeRanking.MOVIE_WEEKLY && (it.toDoubleOrNull() ?: 0.0) > 0.0
+                        ranking != HomeRanking.TV_POPULAR && (it.toDoubleOrNull() ?: 0.0) > 0.0
                     }.orEmpty()
                     DoubanItem(title, cover, rating)
                 }

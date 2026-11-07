@@ -36,6 +36,8 @@ class NativeCmsInstrumentation : Instrumentation() {
                     "backup-roundtrip", "backup-export" -> BackupProbe(this).run(caseId)
                     "backup-downloads" -> BackupProbe(this).downloads()
                     "player-quality" -> PlayerToolsProbe(this).quality()
+                    "episode-picker", "episode-after-error", "playback-recovery", "recovery-cancel", "recovery-fallback", "recovery-refresh" ->
+                        PlaybackControlsProbe(this).run(caseId)
                     "player-prefetch-pause" -> PlayerToolsProbe(this).prefetchPause()
                     "player-prefetch-auto" -> PlayerToolsProbe(this).prefetchAuto()
                     "next-episode-cache", "next-episode-limit", "next-episode-cancel" -> NextEpisodeCacheProbe(this).run(caseId)

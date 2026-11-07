@@ -10,7 +10,10 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Test-APK-only fixture. Responses are supplied by the probe, never proxied. */
-class RegressionHttpServer(private val response: (URI) -> ByteArray) : AutoCloseable {
+class RegressionHttpServer(
+    private val statusCode: (URI) -> Int = { 200 },
+    private val response: (URI) -> ByteArray,
+) : AutoCloseable {
     private val server = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"))
     private val workers = Executors.newFixedThreadPool(8)
     private val counts = ConcurrentHashMap<String, AtomicInteger>()
@@ -30,7 +33,7 @@ class RegressionHttpServer(private val response: (URI) -> ByteArray) : AutoClose
                         counts.computeIfAbsent(path.path) { AtomicInteger() }.incrementAndGet()
                         val body = response(path)
                         it.getOutputStream().apply {
-                            write(("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n").toByteArray())
+                            write(("HTTP/1.1 ${statusCode(path)} Fixture\r\nContent-Type: application/octet-stream\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n").toByteArray())
                             write(body)
                             flush()
                         }

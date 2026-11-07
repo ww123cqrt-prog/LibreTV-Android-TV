@@ -39,7 +39,12 @@ class RecommendPrefetchProbe(private val instrumentation: Instrumentation) {
             if (uri.path.startsWith("/image/")) poster
             else if (uri.path.startsWith("/limited/")) """{"code":429}""".toByteArray()
             else if (uri.path.startsWith("/v2/")) {
-                val title = if (uri.path.endsWith("/movie")) "电影样片" else "剧集样片"
+                val title = when {
+                    uri.path.endsWith("/movie") -> "电影样片"
+                    uri.path.endsWith("/tv_chinese") -> "国产剧样片"
+                    uri.path.endsWith("/tv_global") -> "海外剧样片"
+                    else -> "剧集样片"
+                }
                 JSONObject().put("code", 200).put("data", JSONArray().apply {
                     put(JSONObject().put("title", title).put("cover", JSONObject.NULL)
                         .put("cover_proxy", server.base + "/image/ranked.png").put("rating", 8.1))
@@ -138,14 +143,22 @@ class RecommendPrefetchProbe(private val instrumentation: Instrumentation) {
                         } && field("noMoreRecommend").getBoolean(activity)
                     }
                 }
+                onMain {
+                    val root = field("root").get(activity) as View
+                    check(findLabel(root, "国产剧周榜") == null && findLabel(root, "海外剧周榜") == null)
+                    checkNotNull(findLabel(root, "剧集")).performClick()
+                }
                 pick(HomeRanking.MOVIE_WEEKLY, "电影样片", "8.1")
                 pick(HomeRanking.TV_POPULAR, "剧集样片", "")
+                pick(HomeRanking.TV_CHINESE, "国产剧样片", "8.1")
+                pick(HomeRanking.TV_GLOBAL, "海外剧样片", "8.1")
                 pick(HomeRanking.MOVIE_WEEKLY, "电影样片", "8.1")
                 for (ranking in HomeRanking.entries) {
                     check(server.count("/limited" + ranking.path) == 1)
                     check(server.count(ranking.path) == 1)
                 }
-                return JSONObject().put("case", caseId).put("rankings", 2).put("fallbackAndCache", true)
+                return JSONObject().put("case", caseId).put("rankings", 4)
+                    .put("tvRankingsOnlyInSeries", true).put("fallbackAndCache", true)
             }
             if (caseId == "prefetch-empty-resume") {
                 await("Initial empty page did not settle") {
