@@ -31,13 +31,7 @@ object AppBackup {
         put("version", 1)
         put("createdAt", System.currentTimeMillis())
         put("sources", JSONArray().apply { snapshot.sources.forEach { put(it.toJson()) } })
-        put("history", JSONArray().apply {
-            snapshot.history.forEach { h ->
-                put(JSONObject().put("title", h.title).put("playUrl", h.playUrl)
-                    .put("positionMs", h.positionMs).put("durationMs", h.durationMs)
-                    .put("updatedAt", h.updatedAt).put("cover", h.cover))
-            }
-        })
+        put("history", JSONArray().apply { snapshot.history.forEach { put(it.toJson()) } })
         put("positions", JSONObject(snapshot.positions))
         val s = snapshot.settings
         put("settings", JSONObject().put("seekStepSeconds", s.seekStepSeconds).put("autoNext", s.autoNext)
@@ -61,7 +55,8 @@ object AppBackup {
             List(rows.length()) { index ->
                 val h = rows.getJSONObject(index)
                 HistoryEntry(h.getString("title"), h.getString("playUrl"), h.getLong("positionMs"),
-                    h.getLong("durationMs"), h.getLong("updatedAt"), h.getString("cover")).also {
+                    h.getLong("durationMs"), h.getLong("updatedAt"), h.getString("cover"),
+                    HistorySource.fromJson(h.optJSONObject("source"))).also {
                     require(it.playUrl.isNotEmpty() && it.positionMs >= 0 && it.durationMs >= 0) { "播放历史无效" }
                 }
             }

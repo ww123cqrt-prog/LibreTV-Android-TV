@@ -10,6 +10,7 @@ import android.view.KeyEvent
 import android.widget.GridView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.TextView
 import kotlinx.coroutines.Job
 import org.json.JSONArray
 import org.json.JSONObject
@@ -35,7 +36,16 @@ class RecommendPrefetchProbe(private val instrumentation: Instrumentation) {
         }
         lateinit var server: RegressionHttpServer
         server = RegressionHttpServer { uri ->
-            if (uri.path.startsWith("/image/")) poster else {
+            if (uri.path.startsWith("/image/")) poster
+            else if (uri.path.startsWith("/limited/")) """{"code":429}""".toByteArray()
+            else if (uri.path.startsWith("/v2/")) {
+                val title = if (uri.path.endsWith("/movie")) "电影样片" else "剧集样片"
+                JSONObject().put("code", 200).put("data", JSONArray().apply {
+                    put(JSONObject().put("title", title).put("cover", JSONObject.NULL)
+                        .put("cover_proxy", server.base + "/image/ranked.png").put("rating", 8.1))
+                    put(JSONObject().put("title", "没有海报").put("cover", JSONObject.NULL))
+                }).toString().toByteArray()
+            } else {
                 val params = uri.rawQuery.orEmpty().split('&').associate {
                     val pair = it.split('=', limit = 2)
                     pair[0] to URLDecoder.decode(pair.getOrElse(1) { "" }, "UTF-8")
@@ -77,9 +87,10 @@ class RecommendPrefetchProbe(private val instrumentation: Instrumentation) {
             error(message)
         }
         try {
+            instrumentation.setInTouchMode(false)
             activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
-            val api = Api(doubanEndpoint = server.base + "/subjects")
+            val api = Api(doubanEndpoint = server.base + "/subjects", rankingBases = listOf(server.base + "/limited", server.base))
             onMain {
                 for (name in listOf("job", "recommendJob")) {
                     val f = MainActivity::class.java.declaredFields.firstOrNull { it.name == name }
@@ -103,10 +114,38 @@ class RecommendPrefetchProbe(private val instrumentation: Instrumentation) {
                 onMain { (field("homeBar").get(activity) as LinearLayout).getChildAt(0).requestFocus() }
                 releasePage.countDown()
                 await("Initial catalogue did not load") { grid().adapter.count == 48 && grid().childCount > 0 }
-                var focused = false
-                onMain { focused = grid().hasFocus() }
-                check(focused) { "Initial catalogue left focus on navigation instead of the poster grid" }
-                return JSONObject().put("case", caseId).put("initialItems", 48).put("gridFocused", true)
+                await("First page stole focus from the navigation") {
+                    (field("homeBar").get(activity) as LinearLayout).getChildAt(0).isFocused
+                }
+                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_DOWN)
+                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_DOWN)
+                await("Posters are not reachable from the navigation") { grid().hasFocus() }
+                return JSONObject().put("case", caseId).put("initialItems", 48).put("focusPreserved", true)
+            }
+            if (caseId == "home-rankings") {
+                fun findLabel(view: View, label: String): TextView? {
+                    if (view is TextView && view.text.toString() == label) return view
+                    if (view is ViewGroup) for (i in 0 until view.childCount) {
+                        findLabel(view.getChildAt(i), label)?.let { return it }
+                    }
+                    return null
+                }
+                fun pick(ranking: HomeRanking, title: String, rating: String) {
+                    onMain { checkNotNull(findLabel(field("root").get(activity) as View, ranking.label)).performClick() }
+                    await("Ranking was not bound to the poster grid") {
+                        grid().adapter.count == 1 && grid().adapter.getItem(0).let {
+                            it is DoubanItem && it.title == title && it.rating == rating
+                        } && field("noMoreRecommend").getBoolean(activity)
+                    }
+                }
+                pick(HomeRanking.MOVIE_WEEKLY, "电影样片", "8.1")
+                pick(HomeRanking.TV_POPULAR, "剧集样片", "")
+                pick(HomeRanking.MOVIE_WEEKLY, "电影样片", "8.1")
+                for (ranking in HomeRanking.entries) {
+                    check(server.count("/limited" + ranking.path) == 1)
+                    check(server.count(ranking.path) == 1)
+                }
+                return JSONObject().put("case", caseId).put("rankings", 2).put("fallbackAndCache", true)
             }
             if (caseId == "prefetch-empty-resume") {
                 await("Initial empty page did not settle") {

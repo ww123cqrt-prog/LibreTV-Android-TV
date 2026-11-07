@@ -1,10 +1,19 @@
 package com.dpadtv.client
 
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
@@ -90,8 +99,15 @@ data class VideoInfo(
 )
 
 data class Detail(val episodes: List<String>, val info: VideoInfo)
+data class HistoryPlaylist(val source: SearchItem, val episodes: List<String>, val index: Int)
 
 data class DoubanItem(val title: String, val cover: String, val rating: String)
+
+// These paths and provider order follow LibreSpark/LibreTV v2.21.2 (douban-weekly.ts).
+internal enum class HomeRanking(val label: String, val path: String) {
+    MOVIE_WEEKLY("电影周榜", "/v2/douban/weekly/movie"),
+    TV_POPULAR("热门剧榜", "/v2/baidu/teleplay"),
+}
 
 data class SearchResult(val items: List<SearchItem>, val failures: Int, val reports: List<CmsSourceReport> = emptyList())
 
@@ -99,10 +115,15 @@ data class Channel(val name: String, val url: String, val group: String, val log
 
 class HttpError(val status: Int, val body: String) : java.io.IOException("HTTP $status")
 
-class Api(baseUrl: String = "", private val doubanEndpoint: String = "https://movie.douban.com/j/search_subjects") {
+class Api(
+    baseUrl: String = "",
+    private val doubanEndpoint: String = "https://movie.douban.com/j/search_subjects",
+    private val rankingBases: List<String> = listOf("https://60s.crystelf.top", "https://60s.viki.moe"),
+) {
     val baseUrl = baseUrl
     val isStandalone = true
     private val cms = AppleCmsClient()
+    private val rankings = ConcurrentHashMap<HomeRanking, Pair<Long, List<DoubanItem>>>()
     val lastReports: List<CmsSourceReport> get() = cms.lastReports
 
     fun restoreCookie(value: String?) = Unit
@@ -116,6 +137,39 @@ class Api(baseUrl: String = "", private val doubanEndpoint: String = "https://mo
         onProgress: ((SearchResult) -> Unit)? = null,
     ): SearchResult = cms.search(keyword, sources, deadlineNanos, onProgress)
     fun detail(vodId: String, source: SourceConfig): Detail = cms.detail(vodId, source)
+
+    suspend fun historyPlaylist(
+        title: String, playUrl: String, known: SearchItem?, sources: List<SourceConfig>,
+        dispatcher: CoroutineDispatcher,
+    ): HistoryPlaylist? = withTimeoutOrNull(15_000) {
+        val enabled = sources.filter { it.enabled && !it.isAdult }.associateBy { it.url }
+        if (enabled.isEmpty() || title.isBlank()) return@withTimeoutOrNull null
+        val candidates = if (known != null) listOf(known) else {
+            val result = runInterruptible(dispatcher) { search(title, enabled.values.toList()) }
+            PlaybackSourceRules.matching(result.items, title, "")
+        }
+        val matches = coroutineScope {
+            candidates.mapNotNull { item ->
+                val source = enabled[item.sourceUrl] ?: return@mapNotNull null
+                if (item.vodId.isBlank()) return@mapNotNull null
+                async(dispatcher) {
+                    val detail = runInterruptible { runCatching { detail(item.vodId, source) }.getOrNull() }
+                        ?: return@async null
+                    val resolved = item.copy(
+                        name = detail.info.title.ifEmpty { item.name },
+                        year = detail.info.year.ifEmpty { item.year },
+                    )
+                    val sameTitle = PlaybackSourceRules.matching(listOf(resolved), title, known?.year.orEmpty()).isNotEmpty()
+                    if (sameTitle && playUrl in detail.episodes) resolved to detail.episodes else null
+                }
+            }.awaitAll().filterNotNull()
+        }
+        // 同一份集单可能被多个资源站转载。播放顺序有冲突或地址重复时只保留原链接。
+        val (source, episodes) = matches.distinctBy { it.second }.singleOrNull() ?: return@withTimeoutOrNull null
+        val index = episodes.indexOf(playUrl)
+        if (index == episodes.lastIndexOf(playUrl)) HistoryPlaylist(source, episodes, index) else null
+    }
+
     fun testSource(url: String): Pair<Boolean, Int> = cms.testSource(url)
     fun douban(type: String, tag: String, pageStart: Int, pageSize: Int): List<DoubanItem> {
         val params = mapOf("type" to if (type == "movie") "movie" else "tv", "tag" to tag,
@@ -128,6 +182,41 @@ class Api(baseUrl: String = "", private val doubanEndpoint: String = "https://mo
             DoubanItem(item.getString("title"), item.optString("cover", ""), item.optString("rate", "").takeUnless { it == "0" }.orEmpty())
         }
     }
+
+    internal fun hotList(ranking: HomeRanking): List<DoubanItem> {
+        rankings[ranking]?.let { (fetchedAt, items) ->
+            if (System.nanoTime() - fetchedAt < TimeUnit.HOURS.toNanos(1)) return items
+        }
+        var failure: Exception? = null
+        for (base in rankingBases) {
+            if (Thread.currentThread().isInterrupted) throw InterruptedException()
+            try {
+                val bytes = directBytes(base + ranking.path, accept = "application/json", timeoutMs = 5_000)
+                val response = JSONObject(bytes.toString(Charsets.UTF_8))
+                if (response.optInt("code") != 200) throw IOException("榜单服务暂不可用")
+                val data = response.getJSONArray("data")
+                val items = (0 until data.length()).mapNotNull { index ->
+                    val item = data.optJSONObject(index) ?: return@mapNotNull null
+                    val title = (item.opt("title") as? String).orEmpty().trim()
+                    val cover = (item.opt("cover") as? String).orEmpty()
+                        .ifBlank { (item.opt("cover_proxy") as? String).orEmpty() }
+                    if (title.isBlank() || cover.isBlank()) return@mapNotNull null
+                    val rating = item.optString("rating").takeIf {
+                        ranking == HomeRanking.MOVIE_WEEKLY && (it.toDoubleOrNull() ?: 0.0) > 0.0
+                    }.orEmpty()
+                    DoubanItem(title, cover, rating)
+                }
+                if (items.isEmpty()) throw IOException("榜单暂无数据")
+                rankings[ranking] = System.nanoTime() to items
+                return items
+            } catch (error: IOException) {
+                failure = error
+            } catch (error: JSONException) {
+                failure = error
+            }
+        }
+        throw IOException("榜单暂时无法加载", failure)
+    }
     fun liveChannels(m3uUrl: String): List<Channel> = error("暂不支持直播列表解析")
 
     fun fetchText(url: String): String = directBytes(url).toString(Charsets.UTF_8)
@@ -135,11 +224,11 @@ class Api(baseUrl: String = "", private val doubanEndpoint: String = "https://mo
     fun imageUrl(picUrl: String): String = picUrl
     fun imageBytes(picUrl: String): ByteArray? = try { directBytes(picUrl) } catch (_: java.io.IOException) { null }
 
-    private fun directBytes(address: String, referer: String? = null, accept: String = "*/*"): ByteArray {
+    private fun directBytes(address: String, referer: String? = null, accept: String = "*/*", timeoutMs: Long = 15_000): ByteArray {
         val url = URL(address)
         val host = url.host.lowercase()
         val imageReferer = if (host == "douban.com" || host.endsWith(".douban.com") || host == "doubanio.com" || host.endsWith(".doubanio.com")) "https://movie.douban.com/" else null
-        val conn = directConnection(url, System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(15), AppleCmsClient.USER_AGENT, accept, referer ?: imageReferer)
+        val conn = directConnection(url, System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs), AppleCmsClient.USER_AGENT, accept, referer ?: imageReferer)
         try {
             val code = conn.responseCode
             if (code !in 200..299) throw HttpError(code, "")

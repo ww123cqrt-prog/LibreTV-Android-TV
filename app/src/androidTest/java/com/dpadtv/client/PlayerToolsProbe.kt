@@ -213,7 +213,23 @@ class PlayerToolsProbe(private val instrumentation: Instrumentation) {
                 findResolution(target.window.decorView)?.let { it.isShown && it.text.toString().contains("320 × 180") } == true
             }
             var shown = ""
-            onMain { shown = findResolution(target.window.decorView)!!.text.toString(); player.seekToNextMediaItem() }
+            onMain {
+                shown = findResolution(target.window.decorView)!!.text.toString()
+                val video = PlayerActivity::class.java.getDeclaredField("playerView")
+                    .apply { isAccessible = true }.get(target) as View
+                check(video.height == (video.parent as View).height)
+            }
+            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            await("Back did not clear the controls without leaving playback") {
+                !target.isFinishing && findResolution(target.window.decorView)?.isShown == false
+            }
+            onMain {
+                PlayerActivity::class.java.getDeclaredMethod("showProgress").apply { isAccessible = true }.invoke(target)
+            }
+            await("Progress controls did not hide on the paused frame") {
+                !target.isFinishing && !player.playWhenReady && findResolution(target.window.decorView)?.isShown == false
+            }
+            onMain { player.seekToNextMediaItem() }
             await("Next episode did not enter buffering") {
                 player.currentMediaItemIndex == 1 && player.playbackState == Player.STATE_BUFFERING
             }
@@ -221,7 +237,8 @@ class PlayerToolsProbe(private val instrumentation: Instrumentation) {
                 val after = findResolution(target.window.decorView)?.text.toString()
                 check(after == "分辨率 未知") { "Old resolution survived an episode change: $after" }
             }
-            return JSONObject().put("case", "player-quality").put("displayed", shown).put("resetOnEpisodeChange", true)
+            return JSONObject().put("case", "player-quality").put("displayed", shown)
+                .put("resetOnEpisodeChange", true).put("pausedControlsHide", true)
         } finally {
             releaseNext.countDown()
             onMain { activity?.finish() }

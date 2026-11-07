@@ -27,7 +27,7 @@ class NativeCmsInstrumentation : Instrumentation() {
             if (options.getString("mode") == "regression") {
                 val caseId = options.getString("case").orEmpty()
                 val result = when (caseId) {
-                    "r1", "r1-seek", "r7" -> MainHistoryProbe(this).run(caseId)
+                    "r1", "r1-seek", "r7", "history-next" -> MainHistoryProbe(this).run(caseId)
                     "r2", "r3" -> PlaybackLifecycleProbe(this).run(caseId)
                     "r4" -> SourcePickerProbe(this).run()
                     "r4-unknown" -> SourcePickerProbe(this).run(unknownYear = true)
@@ -39,7 +39,7 @@ class NativeCmsInstrumentation : Instrumentation() {
                     "player-prefetch-pause" -> PlayerToolsProbe(this).prefetchPause()
                     "player-prefetch-auto" -> PlayerToolsProbe(this).prefetchAuto()
                     "next-episode-cache", "next-episode-limit", "next-episode-cancel" -> NextEpisodeCacheProbe(this).run(caseId)
-                    "prefetch-initial", "prefetch-covers", "prefetch-page", "prefetch-scope", "prefetch-background", "prefetch-retry", "prefetch-empty-resume" ->
+                    "home-rankings", "prefetch-initial", "prefetch-covers", "prefetch-page", "prefetch-scope", "prefetch-background", "prefetch-retry", "prefetch-empty-resume" ->
                         RecommendPrefetchProbe(this).run(caseId)
                     else -> error("Unknown regression case: $caseId")
                 }

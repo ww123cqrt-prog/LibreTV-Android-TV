@@ -12,7 +12,30 @@ data class HistoryEntry(
     val durationMs: Long,
     val updatedAt: Long,
     val cover: String = "",
-)
+    val source: HistorySource? = null,
+) {
+    fun toJson(): JSONObject = JSONObject().put("title", title).put("playUrl", playUrl)
+        .put("positionMs", positionMs).put("durationMs", durationMs)
+        .put("updatedAt", updatedAt).put("cover", cover).apply {
+            source?.let { put("source", it.toJson()) }
+        }
+}
+
+data class HistorySource(val url: String, val vodId: String, val title: String, val year: String) {
+    fun toJson(): JSONObject = JSONObject().put("url", url).put("vodId", vodId)
+        .put("title", title).put("year", year)
+
+    companion object {
+        fun fromJson(json: JSONObject?): HistorySource? {
+            json ?: return null
+            val url = json.opt("url") as? String ?: return null
+            val vodId = json.opt("vodId") as? String ?: return null
+            val title = json.opt("title") as? String ?: return null
+            if (url.isBlank() || vodId.isBlank() || title.isBlank()) return null
+            return HistorySource(url, vodId, title, (json.opt("year") as? String).orEmpty())
+        }
+    }
+}
 
 /** 本地配置：服务器、会话 Cookie、片源列表。全部存在应用私有 SharedPreferences。 */
 class Prefs(ctx: Context) {
@@ -135,6 +158,7 @@ class Prefs(ctx: Context) {
                         durationMs = o.optLong("durationMs", 0),
                         updatedAt = o.optLong("updatedAt", 0),
                         cover = o.optString("cover", ""),
+                        source = HistorySource.fromJson(o.optJSONObject("source")),
                     ),
                 )
             }
@@ -147,42 +171,26 @@ class Prefs(ctx: Context) {
     fun upsertHistory(entry: HistoryEntry) {
         // 从历史页进入播放时拿不到封面（传的是旧记录里的空值），
         // 这里保留已有封面，避免"点一次历史，海报就没了"
-        val existing = history().firstOrNull { it.playUrl == entry.playUrl }
+        val list = history()
+        val existing = list.firstOrNull { it.playUrl == entry.playUrl }
         val merged = if (entry.cover.isEmpty() && existing != null) {
             entry.copy(cover = existing.cover, title = entry.title.ifEmpty { existing.title })
         } else {
             entry
         }
-        val list = history().filterNot { it.playUrl == merged.playUrl }.toMutableList()
+        list.removeAll { it.playUrl == merged.playUrl }
         list.add(0, merged)
         while (list.size > 40) list.removeAt(list.size - 1)
-        val arr = JSONArray()
-        list.forEach { e ->
-            arr.put(
-                JSONObject().put("title", e.title)
-                    .put("playUrl", e.playUrl)
-                    .put("positionMs", e.positionMs)
-                    .put("durationMs", e.durationMs)
-                    .put("updatedAt", e.updatedAt)
-                    .put("cover", e.cover),
-            )
-        }
-        sp.edit().putString("history", arr.toString()).apply()
+        saveHistory(list)
     }
 
     fun removeHistory(playUrl: String) {
-        val arr = JSONArray()
-        history().filterNot { it.playUrl == playUrl }.forEach { e ->
-            arr.put(
-                JSONObject().put("title", e.title)
-                    .put("playUrl", e.playUrl)
-                    .put("positionMs", e.positionMs)
-                    .put("durationMs", e.durationMs)
-                    .put("updatedAt", e.updatedAt)
-                    .put("cover", e.cover),
-            )
-        }
-        sp.edit().putString("history", arr.toString()).apply()
+        saveHistory(history().filterNot { it.playUrl == playUrl })
+    }
+
+    private fun saveHistory(list: List<HistoryEntry>) {
+        val rows = JSONArray().apply { list.forEach { put(it.toJson()) } }
+        sp.edit().putString("history", rows.toString()).apply()
     }
 
     fun clearHistory() {
@@ -279,13 +287,7 @@ class Prefs(ctx: Context) {
         sp.all.keys.filter { it.startsWith("pos:") }.forEach { editor.remove(it) }
         backup.positions.forEach { (key, value) -> editor.putLong(key, value) }
         val sources = JSONArray().apply { backup.sources.forEach { put(it.toJson()) } }
-        val history = JSONArray().apply {
-            backup.history.forEach { h ->
-                put(JSONObject().put("title", h.title).put("playUrl", h.playUrl)
-                    .put("positionMs", h.positionMs).put("durationMs", h.durationMs)
-                    .put("updatedAt", h.updatedAt).put("cover", h.cover))
-            }
-        }
+        val history = JSONArray().apply { backup.history.forEach { put(it.toJson()) } }
         val s = backup.settings
         return editor.putString("sources", sources.toString()).putString("history", history.toString())
             .putBoolean("native_sources_initialized", true)
@@ -340,18 +342,7 @@ class Prefs(ctx: Context) {
         val idx = list.indexOfFirst { it.playUrl == playUrl }
         if (idx < 0) return
         list[idx] = list[idx].copy(cover = cover)
-        val arr = JSONArray()
-        list.forEach { e ->
-            arr.put(
-                JSONObject().put("title", e.title)
-                    .put("playUrl", e.playUrl)
-                    .put("positionMs", e.positionMs)
-                    .put("durationMs", e.durationMs)
-                    .put("updatedAt", e.updatedAt)
-                    .put("cover", e.cover),
-            )
-        }
-        sp.edit().putString("history", arr.toString()).apply()
+        saveHistory(list)
     }
 }
 

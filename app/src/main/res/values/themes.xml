@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
-        <item name="android:windowBackground">@android:color/black</item>
-        <item name="android:colorPrimary">#0b101a</item>
+        <item name="android:windowBackground">#151922</item>
+        <item name="android:colorPrimary">#151922</item>
         <item name="android:colorPrimaryDark">#000000</item>
-        <item name="android:colorAccent">#38bdf8</item>
-        <item name="android:colorBackground">#0b101a</item>
-        <item name="android:textColorPrimary">#e5e7eb</item>
-        <item name="android:textColorSecondary">#94a3b8</item>
+        <item name="android:colorAccent">#83DFCB</item>
+        <item name="android:colorBackground">#151922</item>
+        <item name="android:textColorPrimary">#EDF0F6</item>
+        <item name="android:textColorSecondary">#A6B3C6</item>
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:alertDialogTheme">@style/AppDialog</item>
@@ -15,16 +15,16 @@
 
     <!--
       对话框主题：系统 Material 对话框默认是灰底，和全站深色风格不一致。
-      这里统一成「比页面稍亮一点的卡片色 + 亮蓝强调色」，
+      这里统一成「比页面稍亮一点的卡片色 + 品牌强调色」，
       所有 AlertDialog（来源筛选、片源操作、输入框等）都会跟着变。
     -->
     <style name="AppDialog" parent="@android:style/Theme.Material.Dialog.Alert">
         <item name="android:windowBackground">@drawable/dialog_bg</item>
-        <item name="android:colorBackground">#1a2233</item>
-        <item name="android:textColorPrimary">#e5e7eb</item>
-        <item name="android:textColorSecondary">#94a3b8</item>
-        <item name="android:colorAccent">#38bdf8</item>
-        <item name="android:colorControlHighlight">#1e3a5f</item>
+        <item name="android:colorBackground">#252D3A</item>
+        <item name="android:textColorPrimary">#EDF0F6</item>
+        <item name="android:textColorSecondary">#A6B3C6</item>
+        <item name="android:colorAccent">#83DFCB</item>
+        <item name="android:colorControlHighlight">#27443F</item>
         <item name="android:divider">#334155</item>
         <item name="android:dividerHeight">1dp</item>
     </style>

@@ -71,8 +71,9 @@ class PlayerActivity : Activity() {
         const val EXTRA_SOURCE_URL = "sourceUrl"
         const val EXTRA_VOD_ID = "vodId"
         const val EXTRA_YEAR = "year"
+        const val EXTRA_FROM_HISTORY = "fromHistory"
         private const val SAVE_INTERVAL_MS = 5_000L
-        private const val HIDE_UI_DELAY_MS = 4_000L
+        private const val HIDE_UI_DELAY_MS = 2_500L
         private const val HIDE_ACTIONS_DELAY_MS = 6_000L
     }
 
@@ -98,6 +99,8 @@ class PlayerActivity : Activity() {
     private var currentSource: SearchItem? = null
     private var searchTitle = ""
     private var historyEpisodeIndex = 0
+    private var historyNeedsPlaylist = false
+    private var historyPlaylistJob: Job? = null
     private data class SourceBackup(
         val urls: List<String>, val index: Int, val positionMs: Long, val playWhenReady: Boolean,
         val source: SearchItem?, val title: String, val cover: String, val historyIndex: Int,
@@ -163,11 +166,8 @@ class PlayerActivity : Activity() {
     private val clearPendingSeek = Runnable { pendingSeek = -1L }
 
     private val hideUi = Runnable {
-        val p = player
-        val paused = p != null && !p.playWhenReady && p.playbackState != Player.STATE_IDLE
         handler.removeCallbacks(uiTick)
-        // 暂停时控制条常驻；操作栏打开时也不隐藏
-        if (!paused && !isActionBarVisible()) {
+        if (!isActionBarVisible()) {
             progressRow.visibility = View.GONE
         }
         updateChrome()
@@ -175,7 +175,7 @@ class PlayerActivity : Activity() {
 
     private val hideActions = Runnable {
         if (isActionBarVisible()) setActionBarVisible(false)
-        updateChrome()
+        hideUi.run()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -189,8 +189,11 @@ class PlayerActivity : Activity() {
         seriesTitle = intent.getStringExtra(EXTRA_TITLE).orEmpty()
         coverUrl = intent.getStringExtra(EXTRA_COVER).orEmpty()
         val legacy = PlaybackSourceRules.historyIdentity(seriesTitle)
+        historyNeedsPlaylist = intent.getBooleanExtra(EXTRA_FROM_HISTORY, false)
         searchTitle = intent.getStringExtra(EXTRA_SEARCH_TITLE) ?: legacy.title
-        if (!intent.hasExtra(EXTRA_SEARCH_TITLE) && urls.size == 1) historyEpisodeIndex = legacy.episodeIndex
+        if (urls.size == 1 && (historyNeedsPlaylist || !intent.hasExtra(EXTRA_SEARCH_TITLE))) {
+            historyEpisodeIndex = legacy.episodeIndex
+        }
         val sourceUrl = intent.getStringExtra(EXTRA_SOURCE_URL).orEmpty()
         if (sourceUrl.isNotEmpty()) currentSource = SearchItem(
             intent.getStringExtra(EXTRA_SOURCE_NAME).orEmpty(), intent.getStringExtra(EXTRA_VOD_ID).orEmpty(),
@@ -217,7 +220,10 @@ class PlayerActivity : Activity() {
             setText(baseText)
             setTextColor(android.graphics.Color.parseColor("#cbd5e1"))
             setTextSize(14f)
-            setPadding(48, 28, 48, 0)
+            setSingleLine()
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(dp(32), dp(18), dp(32), 0)
+            setShadowLayer(dp(3).toFloat(), 0f, dp(1).toFloat(), 0xD0000000.toInt())
             visibility = View.GONE
         }
         root.addView(
@@ -233,8 +239,11 @@ class PlayerActivity : Activity() {
         progressRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(48, 20, 48, 20)
-            setBackgroundColor(0xB3000000.toInt())
+            setPadding(dp(12), 0, dp(12), 0)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0x70151922)
+                cornerRadius = dp(10).toFloat()
+            }
             visibility = View.GONE
         }
         playPauseIcon = ImageView(this).apply {
@@ -243,18 +252,20 @@ class PlayerActivity : Activity() {
         seekBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 1000
             progressDrawable = getDrawable(R.drawable.player_progress)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            layoutParams = LinearLayout.LayoutParams(0, dp(4), 1f)
         }
         timeText = TextView(this).apply {
             setTextColor(android.graphics.Color.WHITE)
-            setTextSize(14f)
-            setPadding(24, 0, 0, 0)
+            setTextSize(13f)
+            setPadding(dp(12), 0, 0, 0)
+            setShadowLayer(dp(2).toFloat(), 0f, 0f, android.graphics.Color.BLACK)
         }
         resolutionText = TextView(this).apply {
             text = "分辨率 未知"
             setTextColor(0xFFCBD5E1.toInt())
             setTextSize(13f)
-            setPadding(dp(16), 0, 0, 0)
+            setPadding(dp(12), 0, 0, 0)
+            setShadowLayer(dp(2).toFloat(), 0f, 0f, android.graphics.Color.BLACK)
         }
         progressRow.addView(
             playPauseIcon,
@@ -270,9 +281,13 @@ class PlayerActivity : Activity() {
             progressRow,
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
+                dp(32),
                 Gravity.BOTTOM,
-            ),
+            ).apply {
+                leftMargin = dp(32)
+                rightMargin = dp(32)
+                bottomMargin = dp(8)
+            },
         )
 
         // 底部操作栏（默认隐藏）
@@ -280,11 +295,7 @@ class PlayerActivity : Activity() {
         sourceAction = actionButton("换源") { showSourcePicker() }
         actionBar.addView(sourceAction)
         actionBar.addView(actionButton("下集") {
-            if (player?.hasNextMediaItem() == true) {
-                player?.seekToNextMediaItem()
-            } else {
-                toast("已是最后一集")
-            }
+            seekToNextEpisode()
             showActions()
         })
         actionBar.addView(actionButton("上集") {
@@ -316,7 +327,7 @@ class PlayerActivity : Activity() {
         actionScroll = HorizontalScrollView(this).apply {
             isFocusable = false
             descendantFocusability = android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS
-            setPadding(dp(48), 0, dp(48), 0)
+            setPadding(dp(32), 0, dp(32), 0)
             addView(actionBar)
             visibility = View.GONE
         }
@@ -326,7 +337,7 @@ class PlayerActivity : Activity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM,
-            ).apply { bottomMargin = dp(48) },
+            ).apply { bottomMargin = dp(46) },
         )
 
         // 缓冲提示 + 网速
@@ -408,7 +419,7 @@ class PlayerActivity : Activity() {
                         handler.removeCallbacks(clearPendingSeek)
                         currentIndex = exo.currentMediaItemIndex
                         hasError = false
-                        baseText = labelFor(currentIndex) + currentSource?.let { " · ${it.sourceName}" }.orEmpty()
+                        baseText = playbackLabel()
                         if (!hasError) {
                             titleText.text = baseText
                             titleText.setTextColor(android.graphics.Color.parseColor("#cbd5e1"))
@@ -444,7 +455,7 @@ class PlayerActivity : Activity() {
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         updatePlayPauseIcon()
                         updateChrome()
-                        if (!isPlaying) showProgress()
+                        if (!isPlaying && !exo.playWhenReady) showProgress()
                         updateNextEpisodePrefetch()
                     }
 
@@ -478,6 +489,7 @@ class PlayerActivity : Activity() {
                         videoFrameRendered = true
                         showResolution(exo.videoSize)
                         if (sourceBackup != null) {
+                            historyNeedsPlaylist = false
                             sourceBackup = null
                             handler.removeCallbacks(sourceTimeout)
                             sourceAction.isEnabled = true
@@ -498,12 +510,36 @@ class PlayerActivity : Activity() {
                 exo.playWhenReady = true
             }
 
+        if (historyNeedsPlaylist) restoreHistoryPlaylist(legacy.title)
         updateSpeedAction()
         if (kotlin.math.abs(prefs.playbackSpeed - 1f) > 0.01f) {
             toast("当前倍速 ${speedLabel(prefs.playbackSpeed)}（在上键菜单里可改回 X1.00）")
         }
         updatePlayPauseIcon()
         updateChrome()
+    }
+
+    private fun restoreHistoryPlaylist(title: String) {
+        val p = player ?: return
+        historyPlaylistJob = sourceScope.launch {
+            val (source, episodes, index) = Api().historyPlaylist(
+                title, currentUrl(), currentSource, prefs.sources(), sourceDispatcher,
+            ) ?: return@launch
+            val alreadyEnded = p.playbackState == Player.STATE_ENDED
+            historyNeedsPlaylist = false
+            currentSource = source
+            seriesTitle = title
+            urls = episodes
+            historyEpisodeIndex = 0
+            // Keep the already playing MediaItem so adding the other episodes does not restart it.
+            if (index > 0) p.addMediaItems(0, episodes.take(index).map(MediaItem::fromUri))
+            p.addMediaItems(episodes.drop(index + 1).map(MediaItem::fromUri))
+            currentIndex = p.currentMediaItemIndex
+            baseText = playbackLabel()
+            if (!hasError) titleText.text = baseText
+            if (alreadyEnded && p.playWhenReady && prefs.autoNext && p.hasNextMediaItem()) p.seekToNextMediaItem()
+            updateNextEpisodePrefetch()
+        }
     }
 
     /** Let the current episode finish buffering before using idle bandwidth for its immediate successor. */
@@ -639,6 +675,7 @@ class PlayerActivity : Activity() {
             toast("该来源没有第 ${targetIndex + 1} 集，保留当前播放")
             return
         }
+        historyPlaylistJob?.cancel()
         cancelNextEpisodePrefetch()
         completedPrefetchUrl = ""
         persistProgress()
@@ -696,11 +733,9 @@ class PlayerActivity : Activity() {
     /** 片名可见性：出错 / 暂停 / 控制条或操作栏显示中 */
     private fun updateChrome() {
         if (!::titleText.isInitialized) return
-        val p = player
-        val paused = p != null && !p.playWhenReady && p.playbackState != Player.STATE_IDLE
         val chromeVisible = (::progressRow.isInitialized && progressRow.visibility == View.VISIBLE) ||
             isActionBarVisible()
-        titleText.visibility = if (hasError || paused || chromeVisible) View.VISIBLE else View.GONE
+        titleText.visibility = if (hasError || chromeVisible) View.VISIBLE else View.GONE
     }
 
     private fun updateProgress() {
@@ -716,7 +751,6 @@ class PlayerActivity : Activity() {
             seekBar.secondaryProgress = 0
             timeText.text = formatTime(p.currentPosition) + " / --:--"
         }
-        updatePlayPauseIcon()
     }
 
     /** 用 Canvas 画播放/暂停图标，省掉两张 png */
@@ -785,15 +819,16 @@ class PlayerActivity : Activity() {
 
     /** 下键 / 菜单键：呼出操作栏，焦点落到第一个按钮 */
     private fun showActions() {
+        val opening = !isActionBarVisible()
         setActionBarVisible(true)
         progressRow.visibility = View.VISIBLE
         handler.removeCallbacks(hideUi)
         handler.removeCallbacks(uiTick)
         handler.post(uiTick)
         updateChrome()
-        if (actionBar.childCount > 0) {
+        if (opening) {
             actionBar.post {
-                actionBar.getChildAt(0).requestFocus()
+                if (isActionBarVisible()) actionBar.getChildAt(0).requestFocus()
             }
         }
         handler.removeCallbacks(hideActions)
@@ -802,21 +837,24 @@ class PlayerActivity : Activity() {
 
     private fun actionButton(label: String, onClick: () -> Unit): TextView = TextView(this).apply {
         text = label
-        setTextColor(0xFFE5E7EB.toInt())
+        setTextColor(0xFFEDF0F6.toInt())
         setTextSize(14f)
         setPadding(dp(22), dp(12), dp(22), dp(12))
         val normal = android.graphics.drawable.GradientDrawable().apply {
-            setColor(0xFF2B3A52.toInt())
+            setColor(0xE6252D3A.toInt())
             cornerRadius = dp(8).toFloat()
         }
         val focused = android.graphics.drawable.GradientDrawable().apply {
-            setColor(0xFF3E7FD4.toInt())
+            setColor(0xFF83DFCB.toInt())
             cornerRadius = dp(8).toFloat()
         }
         background = normal
         isFocusable = true
         isFocusableInTouchMode = true
-        setOnFocusChangeListener { v, has -> v.background = if (has) focused else normal }
+        setOnFocusChangeListener { v, has ->
+            v.background = if (has) focused else normal
+            setTextColor(if (has) 0xFF111C20.toInt() else 0xFFEDF0F6.toInt())
+        }
         setOnClickListener { onClick() }
         val lp = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -919,6 +957,9 @@ class PlayerActivity : Activity() {
 
     private fun currentUrl(): String = urls.getOrNull(currentIndex).orEmpty()
 
+    private fun playbackLabel(): String = labelFor(currentIndex) +
+        currentSource?.sourceName?.takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty()
+
     private fun labelFor(index: Int): String {
         if (urls.size <= 1) return seriesTitle.ifEmpty { "正在播放" }
         return "$seriesTitle · 第 ${index + 1}/${urls.size} 集"
@@ -943,10 +984,25 @@ class PlayerActivity : Activity() {
                         durationMs = p.duration.coerceAtLeast(0L),
                         updatedAt = System.currentTimeMillis(),
                         cover = coverUrl,
+                        source = currentSource?.let { HistorySource(it.sourceUrl, it.vodId, it.name, it.year) },
                     ),
                 )
             }
         }
+    }
+
+    private fun seekToNextEpisode(): Boolean {
+        val p = player ?: return false
+        if (p.hasNextMediaItem()) {
+            p.seekToNextMediaItem()
+            return true
+        }
+        toast(when {
+            historyPlaylistJob?.isActive == true -> "正在恢复集数，请稍候"
+            historyNeedsPlaylist -> "这条观看记录暂时无法确认下一集"
+            else -> "已是最后一集"
+        })
+        return false
     }
 
     private fun formatTime(ms: Long): String {
@@ -966,24 +1022,27 @@ class PlayerActivity : Activity() {
             )
     }
 
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (isActionBarVisible() && event.action == KeyEvent.ACTION_DOWN) {
+            handler.removeCallbacks(hideActions)
+            handler.postDelayed(hideActions, HIDE_ACTIONS_DELAY_MS)
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         val p = player ?: return super.onKeyDown(keyCode, event)
 
         // 操作栏打开时：按键全部交给菜单（按钮可聚焦、可点击）
         if (isActionBarVisible()) {
             if (event.action == KeyEvent.ACTION_DOWN) {
-                handler.removeCallbacks(hideActions)
-                handler.postDelayed(hideActions, HIDE_ACTIONS_DELAY_MS)
                 when (keyCode) {
                     KeyEvent.KEYCODE_BACK,
                     KeyEvent.KEYCODE_MENU,
                     KeyEvent.KEYCODE_M,
+                    KeyEvent.KEYCODE_DPAD_DOWN,
                     -> {
-                        hideActions.run()
-                        return true
-                    }
-                    KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        // 已经在操作栏上，再按下键就收起
+                        handler.removeCallbacks(hideActions)
                         hideActions.run()
                         return true
                     }
@@ -996,7 +1055,7 @@ class PlayerActivity : Activity() {
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_SPACE,
             -> {
-                if (p.isPlaying) p.pause() else p.play()
+                if (p.playWhenReady) p.pause() else p.play()
                 showProgress()
                 true
             }
@@ -1029,10 +1088,7 @@ class PlayerActivity : Activity() {
                 true
             }
             KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                if (p.hasNextMediaItem()) {
-                    p.seekToNextMediaItem()
-                    showProgress()
-                }
+                if (seekToNextEpisode()) showProgress()
                 true
             }
             KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {

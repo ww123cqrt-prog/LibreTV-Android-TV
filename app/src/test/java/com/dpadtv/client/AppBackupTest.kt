@@ -21,6 +21,21 @@ class AppBackupTest {
         assertEquals(123_456L, restored.history.single().positionMs)
     }
 
+    @Test fun versionOneBackupsPreserveOptionalHistorySource() {
+        val json = JSONObject(AppBackup.encode(snapshot))
+        val source = JSONObject().put("url", "https://a.example/api").put("vodId", "42")
+            .put("title", "三体").put("year", "2023")
+        json.getJSONArray("history").getJSONObject(0).put("source", source)
+
+        val restored = AppBackup.decode(json.toString())
+        val roundTripped = JSONObject(AppBackup.encode(restored)).getJSONArray("history").getJSONObject(0)
+        assertEquals("42", roundTripped.getJSONObject("source").getString("vodId"))
+        assertEquals("https://a.example/api", roundTripped.getJSONObject("source").getString("url"))
+        assertEquals("三体", roundTripped.getJSONObject("source").getString("title"))
+        assertEquals("2023", roundTripped.getJSONObject("source").getString("year"))
+        assertEquals(123_456L, roundTripped.getLong("positionMs"))
+    }
+
     @Test fun emptyListsRemainEmptyInsteadOfSeedingDefaultSources() {
         val empty = snapshot.copy(sources = emptyList(), history = emptyList(), positions = emptyMap())
         assertEquals(empty, AppBackup.decode(AppBackup.encode(empty)))

@@ -1,6 +1,8 @@
 package com.dpadtv.client
 
 import com.sun.net.httpserver.HttpServer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import java.net.InetSocketAddress
 import java.net.URI
 import java.net.URLDecoder
@@ -45,6 +47,11 @@ class AppleCmsClientTest {
                 .put("vod_name", "三体 $page").put("vod_pic", "https://img.test/a.jpg")
                 .put("type_name", "国产剧").put("vod_year", "2023")
                 .put("vod_play_url", "第1集\$https://cdn.test/1.m3u8")
+            if (uri.path.startsWith("/history")) {
+                val next = if (uri.path == "/history-conflict") "special" else "3"
+                row.put("vod_name", "历史剧集")
+                    .put("vod_play_url", "第1集\$https://cdn.test/1.m3u8#第2集\$https://cdn.test/2.m3u8#下一集\$https://cdn.test/$next.m3u8")
+            }
             val pageCount = when (uri.path) { "/paged" -> 9; "/partial" -> 3; else -> 1 }
             val json = JSONObject().put("list", JSONArray().put(row)).put("pagecount", pageCount).toString()
             val body = when {
@@ -84,6 +91,30 @@ class AppleCmsClientTest {
         assertEquals(listOf("https://cdn.test/1.m3u8"), result.episodes)
         assertTrue(requests.single().rawQuery.contains("ids=7"))
         assertFalse(requests.single().path.contains("/api/detail"))
+    }
+
+    @Test fun savedHistorySourceUsesOnlyItsVodId() = runBlocking {
+        val source = SourceConfig("fixture", "$base/history")
+        val known = SearchItem(source.name, "7", "历史剧集", "", "", "2023", "", source.url)
+        val playlist = Api().historyPlaylist("历史剧集", "https://cdn.test/2.m3u8", known, listOf(source), Dispatchers.IO)
+        assertEquals(1, playlist?.index)
+        assertEquals("https://cdn.test/3.m3u8", playlist?.episodes?.get(2))
+        assertTrue(requests.single().rawQuery.contains("ids=7"))
+    }
+
+    @Test fun legacyHistoryFindsItsActualNextEpisodeByExactUrl() = runBlocking {
+        val sources = listOf(SourceConfig("fixture", "$base/history"), SourceConfig("other", "$base/ok"))
+        val playlist = Api().historyPlaylist("历史剧集", "https://cdn.test/2.m3u8", null, sources, Dispatchers.IO)
+        assertEquals(1, playlist?.index)
+        assertEquals("https://cdn.test/3.m3u8", playlist?.episodes?.get(2))
+        assertEquals("$base/history", playlist?.source?.sourceUrl)
+    }
+
+    @Test fun legacyHistoryHasNoPlaylistWhenUrlIsMissingOrOrderConflicts() = runBlocking {
+        val sources = listOf(SourceConfig("fixture", "$base/history"), SourceConfig("different order", "$base/history-conflict"))
+        val api = Api()
+        assertNull(api.historyPlaylist("历史剧集", "https://cdn.test/unrelated.m3u8", null, sources, Dispatchers.IO))
+        assertNull(api.historyPlaylist("历史剧集", "https://cdn.test/2.m3u8", null, sources, Dispatchers.IO))
     }
 
     @Test fun fetchesNoMoreThanFiveRealPages() {

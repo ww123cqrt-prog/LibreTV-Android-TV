@@ -12,6 +12,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.InsetDrawable
 import android.text.SpannableString
+import android.text.TextUtils
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
@@ -73,6 +74,7 @@ class MainActivity : Activity() {
     private var liveChannelSource: String = ""
     private var mediaType = "movie"
     private var recommendPage = 0
+    private var recommendSelection = 0
     private var recommendTag = "热门"
     private var isLoadingMore = false
     private var noMoreRecommend = false
@@ -94,63 +96,37 @@ class MainActivity : Activity() {
 
     /* ---------------------------------------------------------- 焦点视觉 */
 
-    // 电视上最致命的问题就是「看不出焦点在哪」。统一用高对比度方案：
-    // 聚焦 = 亮蓝填充 + 深色文字 + 4dp 亮色描边 + 轻微放大。
-    private val ACCENT = 0xFF38BDF8.toInt()
-    private val BRIGHT = 0xFFE0F2FE.toInt()
-    private val INK = 0xFF04121B.toInt()
-    private val TEXT_COLOR = 0xFFE5E7EB.toInt()
-    private val PANEL = 0xFF1F2937.toInt()
+    private val ACCENT = 0xFF83DFCB.toInt()
+    private val INK = 0xFF111C20.toInt()
+    private val TEXT_COLOR = 0xFFEDF0F6.toInt()
+    private val PANEL = 0xFF252D3A.toInt()
+    private val MUTED = 0xFFA6B3C6.toInt()
     private val BRIGHTER_TEXT = 0xFFCBD5E1.toInt()
 
-    /**
-     * 给任意可聚焦控件装上焦点视觉。
-     *
-     * 关键点（踩过坑）：海报格子整块被 ImageView 占满，如果只改 background，
-     * 焦点色会被图片盖住 —— 真机上看起来就是「焦点还是黑的」。
-     * 所以额外用 **foreground** 画一圈亮色描边，它画在内容之上，
-     * 图片加载成功、失败、纯色占位都能看见焦点。
-     *
-     * 另外用 InsetDrawable 内缩 3dp，让相邻按钮/行之间天然有缝，
-     * 不会因为 LinearLayout 没设 margin 而连成一片。
-     *
-     * @param textView 需要跟着变色的文字（控件本身就是文字时传它自己）
-     * @param focusedBg 聚焦时的填充色（主按钮本身就是蓝色，需要更亮一档才看得出变化）
-     */
+    /** Buttons fill on focus. Editable fields retain an outline so text stays readable. */
     private fun applyFocusStyle(
         view: View,
         normalBg: Int,
         textView: TextView? = null,
         normalText: Int = TEXT_COLOR,
-        focusedBg: Int = ACCENT,
+        focusedBg: Int? = null,
         onFocusChanged: ((Boolean) -> Unit)? = null,
-        focusScale: Float = 1.04f,
+        focusScale: Float = 1.02f,
     ) {
         val normal = InsetDrawable(
             GradientDrawable().apply {
                 setColor(normalBg)
-                cornerRadius = dp(8).toFloat()
+                cornerRadius = dp(10).toFloat()
             },
             dp(3),
         )
-        // 焦点态 = 同样的填充 + 亮色描边。描边放进背景而不是 foreground：
-        // 实测 Button 上 foreground 不渲染（放大截图里 5 个按钮完全一样），
-        // 画进背景则一定能画出来，卡片和按钮也就能共用同一套样式。
         val focused = InsetDrawable(
             GradientDrawable().apply {
-                setColor(normalBg)
-                cornerRadius = dp(8).toFloat()
-                setStroke(dp(5), BRIGHT)
+                setColor(focusedBg ?: normalBg)
+                cornerRadius = dp(10).toFloat()
+                if (focusedBg == null) setStroke(dp(2), ACCENT)
             },
             dp(3),
-        )
-        val ring = InsetDrawable(
-            GradientDrawable().apply {
-                setColor(Color.TRANSPARENT)
-                cornerRadius = dp(8).toFloat()
-                setStroke(dp(4), BRIGHT)
-            },
-            dp(2),
         )
 
         // View.setBackground() 会用背景 drawable 的 padding 覆盖控件自身的 padding！
@@ -163,10 +139,9 @@ class MainActivity : Activity() {
         val padBottom = view.paddingBottom
 
         fun render(focusedNow: Boolean) {
-            // 焦点只用亮色外框表示：不改填充、不反转文字颜色。
-            // （早期用蓝底+深色字，深色主题下反而显得脏；白框在深色背景上已经足够醒目）
             view.background = if (focusedNow) focused else normal
             view.setPadding(padLeft, padTop, padRight, padBottom)
+            textView?.setTextColor(if (focusedNow && focusedBg != null) INK else normalText)
             val s = if (focusedNow) focusScale else 1f
             view.scaleX = s
             view.scaleY = s
@@ -222,7 +197,7 @@ class MainActivity : Activity() {
         maybeCheckUpdate()
 
         root = FrameLayout(this)
-        root.setBackgroundColor(Color.parseColor("#0b101a"))
+        root.setBackgroundColor(0xFF151922.toInt())
         setContentView(root)
         hideSystemUi()
 
@@ -350,17 +325,17 @@ class MainActivity : Activity() {
      * LibreTV wordmark。刻意用文字 + 形状拼出来（不引图片资源）：
      * 任意分辨率都清晰，也不给 APK 增加体积。
      */
-    private fun brandRow(showTagline: Boolean = true): LinearLayout {
+    private fun brandRow(): LinearLayout {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, dp(6))
+            setPadding(0, 0, dp(12), 0)
         }
 
         // 方块标记：播放三角
         row.addView(
             TextView(this).apply {
-                setText("▶")
+                text = "▶"
                 setTextSize(17f)
                 setTextColor(INK)
                 gravity = Gravity.CENTER
@@ -368,19 +343,17 @@ class MainActivity : Activity() {
                     setColor(ACCENT)
                     cornerRadius = dp(10).toFloat()
                 }
-            },
+            }, LinearLayout.LayoutParams(dp(34), dp(34)),
         )
 
         // 显示名称与系统桌面使用同一份资源
         row.addView(
             TextView(this).apply {
-                val text = SpannableString(getString(R.string.app_name))
-                text.setSpan(ForegroundColorSpan(TEXT_COLOR), 0, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                text.setSpan(ForegroundColorSpan(ACCENT), 0, 7, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                text.setSpan(StyleSpan(Typeface.BOLD), 0, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                setText(text)
-                setTextSize(23f)
-                setPadding(dp(10), 0, dp(12), 0)
+                text = getString(R.string.app_name)
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(TEXT_COLOR)
+                setTextSize(22f)
+                setPadding(dp(10), 0, 0, 0)
                 gravity = Gravity.CENTER_VERTICAL
             },
         )
@@ -392,14 +365,14 @@ class MainActivity : Activity() {
         TextView(this).apply {
             setText(text)
             setTextSize(size)
-            setTextColor(Color.parseColor("#e5e7eb"))
+            setTextColor(TEXT_COLOR)
         }
 
     private fun hintText(text: String): TextView =
         TextView(this).apply {
             setText(text)
             setTextSize(15f)
-            setTextColor(Color.parseColor("#94a3b8"))
+            setTextColor(MUTED)
             setPadding(0, dp(6), 0, dp(10))
         }
 
@@ -441,7 +414,6 @@ class MainActivity : Activity() {
             applyFocusStyle(
                 view = this,
                 normalBg = 0xFF111827.toInt(),
-                focusedBg = 0xFF1E3A5F.toInt(),
                 focusScale = 1f,
                 onFocusChanged = { hasFocus ->
                     if (hasFocus) {
@@ -460,21 +432,20 @@ class MainActivity : Activity() {
             isAllCaps = false
             setTextSize(16f)
             isSingleLine = true
-            setTextColor(if (primary) INK else TEXT_COLOR)
             // 按内容自适应宽度：固定 dp 宽度在低分辨率电视上会被挤出屏幕
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(46))
-            minWidth = dp(76)
-            minimumWidth = dp(76)
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(44))
+            minWidth = dp(68)
+            minimumWidth = dp(68)
             // 替换背景后按钮自带的内边距会丢，显式补上，避免文字贴边
-            setPadding(dp(20), dp(8), dp(20), dp(8))
+            setPadding(dp(14), dp(6), dp(14), dp(6))
             setOnClickListener { onClick() }
             applyFocusStyle(
                 this,
-                if (primary) ACCENT else PANEL,
+                if (primary) 0xFF27443F.toInt() else PANEL,
                 this,
-                if (primary) INK else TEXT_COLOR,
-                if (primary) 0xFF7DD3FC.toInt() else ACCENT,
+                if (primary) ACCENT else TEXT_COLOR,
+                ACCENT,
             )
         }
 
@@ -522,8 +493,8 @@ class MainActivity : Activity() {
         val ring = InsetDrawable(
             GradientDrawable().apply {
                 setColor(Color.TRANSPARENT)
-                cornerRadius = dp(8).toFloat()
-                setStroke(dp(5), BRIGHT)
+                cornerRadius = dp(11).toFloat()
+                setStroke(dp(3), ACCENT)
             },
             dp(3),
         )
@@ -581,6 +552,7 @@ class MainActivity : Activity() {
         isFocusable = true
         isFocusableInTouchMode = true
         setSelector(listSelector())
+        setDrawSelectorOnTop(true)
     }
 
     /** 统一切到后台线程调用 API，异常在 UI 线程上提示。 */
@@ -816,7 +788,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(40), dp(24), dp(40), dp(20))
         }
-        col.addView(brandRow(false))
+        col.addView(brandRow())
         col.addView(titleText("选择 sources.json · 当前：" + browsePath, 15f))
 
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -1188,7 +1160,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(48), dp(24), dp(48), dp(20))
         }
-        col.addView(brandRow(false))
+        col.addView(brandRow())
         col.addView(titleText("首页按钮排序", 20f))
         col.addView(hintText("选中一条按 OK：上移 / 下移 / 隐藏 / 恢复默认"))
 
@@ -1316,7 +1288,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(48), dp(24), dp(48), dp(20))
         }
-        col.addView(brandRow(false))
+        col.addView(brandRow())
         col.addView(titleText("播放设置", 20f))
         col.addView(hintText("选中一条按 OK，在弹出的菜单里选择"))
 
@@ -1412,7 +1384,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(56), dp(36), dp(56), dp(36))
         }
-        col.addView(brandRow(false))
+        col.addView(brandRow())
         col.addView(titleText("服务器设置", 20f))
         col.addView(hintText("填写 LibreTV 服务端的地址与访问密码"))
 
@@ -1489,7 +1461,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(40), dp(20), dp(40), dp(16))
         }
-        col.addView(brandRow(false))
+        col.addView(brandRow())
         col.addView(titleText("片源管理 · ${sources.size} 个（启用 $enabledCount）", 18f))
 
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -1731,7 +1703,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(48), dp(24), dp(48), dp(20))
         }
-        col.addView(brandRow(false))
+        col.addView(brandRow())
         col.addView(titleText(title, 20f))
         val input = field(hint, value)
         if (multiline) {
@@ -1779,7 +1751,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(48), dp(24), dp(48), dp(20))
         }
-        col.addView(brandRow(false))
+        col.addView(brandRow())
         col.addView(titleText("添加片源", 20f))
         col.addView(hintText("选一种方式，越靠上越省事"))
 
@@ -1829,7 +1801,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(48), dp(24), dp(48), dp(20))
         }
-        col.addView(brandRow(false))
+        col.addView(brandRow())
         col.addView(titleText("手动添加采集站", 20f))
         col.addView(hintText("地址形如 https://xxx/api.php/provide/vod（只支持 Apple CMS JSON 接口）"))
         val nameField = field("名称（可留空，自动取域名）")
@@ -1886,7 +1858,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(48), dp(24), dp(48), dp(20))
         }
-        col.addView(brandRow(false))
+        col.addView(brandRow())
         col.addView(titleText("扫码添加片源", 20f))
         col.addView(hintText(
             if (qrServer == null) {
@@ -2172,7 +2144,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(40), dp(20), dp(40), dp(16))
         }
-        col.addView(brandRow(false))
+        col.addView(brandRow())
 
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         resultsCount = titleText("${resultGroups.size} 部影片 · ${lastResults.size} 条资源" + if (searchFinished) "" else " · 搜索中…", 18f)
@@ -2196,7 +2168,7 @@ class MainActivity : Activity() {
 
         setScreen(col)
         resultsGrid = grid
-        grid.requestFocus()
+        if (resultGroups.isNotEmpty()) grid.requestFocus()
     }
 
     private fun updateSearchResults(result: SearchResult) {
@@ -2313,7 +2285,7 @@ class MainActivity : Activity() {
         }
 
         val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        col.addView(brandRow(false))
+        col.addView(brandRow())
         val keywordField = field("输入影片名称…")
         keywordField.imeOptions = EditorInfo.IME_ACTION_SEARCH
         header.addView(keywordField, LinearLayout.LayoutParams(dp(580), dp(48)))
@@ -2399,12 +2371,12 @@ class MainActivity : Activity() {
                 updateSearchResults(result)
                 val partial = result.reports.count { it.failedPages.isNotEmpty() }
                 if (result.items.isEmpty()) {
-                    showHome()
+                    resultsCount.text = "0 部影片 · 「$kw」暂无可用片源"
                     if (result.failures > 0) {
                         AlertDialog.Builder(this@MainActivity).setTitle("片源请求失败")
                             .setMessage(result.reports.filter { !it.ok }.joinToString("\n") { "${it.name}：${it.category} ${it.error}" })
                             .setPositiveButton("确定", null).show()
-                    } else toast("没有找到结果，请换个片名")
+                    }
                 } else if (result.failures > 0 || partial > 0) {
                     toast("搜索完成 · ${result.failures} 个来源请求失败 · $partial 个来源分页不全")
                 }
@@ -2586,11 +2558,21 @@ class MainActivity : Activity() {
         }
     }
 
-    /** 单集播放（直播频道、观看历史都用这个） */
+    /** 单地址播放，例如直播频道。 */
     private fun play(url: String, title: String) = playFromList(listOf(url), 0, title)
 
-    /** 整季播放：把整个集数列表交给播放器，一集放完自动进下一集 */
-    private fun playFromList(urls: List<String>, index: Int, title: String, cover: String = "", source: SearchItem? = null) {
+    private fun playHistory(entry: HistoryEntry) {
+        val item = entry.source?.let { saved ->
+            val sourceName = prefs.sources().firstOrNull { it.url == saved.url }?.name.orEmpty()
+            SearchItem(sourceName, saved.vodId, saved.title, entry.cover, "", saved.year, "", saved.url)
+        }
+        playFromList(listOf(entry.playUrl), 0, entry.title, entry.cover, item, fromHistory = true)
+    }
+
+    private fun playFromList(
+        urls: List<String>, index: Int, title: String, cover: String = "", source: SearchItem? = null,
+        fromHistory: Boolean = false,
+    ) {
         if (urls.isEmpty()) return
         returningFromPlayback = true
         startActivity(Intent(this, PlayerActivity::class.java).apply {
@@ -2598,6 +2580,7 @@ class MainActivity : Activity() {
             putExtra(PlayerActivity.EXTRA_INDEX, index.coerceIn(0, urls.size - 1))
             putExtra(PlayerActivity.EXTRA_TITLE, title)
             putExtra(PlayerActivity.EXTRA_COVER, cover)
+            if (fromHistory) putExtra(PlayerActivity.EXTRA_FROM_HISTORY, true)
             source?.let {
                 putExtra(PlayerActivity.EXTRA_SEARCH_TITLE, it.name.trim())
                 putExtra(PlayerActivity.EXTRA_SOURCE_NAME, it.sourceName)
@@ -2744,10 +2727,7 @@ class MainActivity : Activity() {
             val listView = newList()
             bindList(listView, 
                 items.map { "${it.title}    ${formatTime(it.positionMs)} / ${formatTime(it.durationMs)}" },
-                onItem = { idx ->
-                    val h = items[idx]
-                    play(h.playUrl, h.title)
-                },
+                onItem = { idx -> playHistory(items[idx]) },
             )
             listView.setOnItemLongClickListener { _, _, pos, _ ->
                 prefs.removeHistory(items[pos].playUrl)
@@ -2791,7 +2771,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(40), dp(20), dp(40), dp(16))
         }
-        col.addView(brandRow(false))
+        col.addView(brandRow())
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val historyCount = titleText("继续观看 · ${items2.size} 条", 18f)
         bar.addView(historyCount)
@@ -2851,12 +2831,12 @@ class MainActivity : Activity() {
                     imageLoader.load(h.cover, dp(120), dp(170)) { bmp ->
                         if (poster.tag == h.cover) poster.setImageBitmap(bmp)
                     }
-                    cell.setOnClickListener { play(h.playUrl, h.title) }
+                    cell.setOnClickListener { playHistory(h) }
                     return cell
                 }
             }
             grid.setOnItemClickListener { _, _, pos, _ ->
-                items2.getOrNull(pos)?.let { play(it.playUrl, it.title) }
+                items2.getOrNull(pos)?.let(::playHistory)
             }
             refreshHistoryCards = {
                 val selectedUrl = (grid.selectedItem as? HistoryEntry)?.playUrl
@@ -2888,6 +2868,26 @@ class MainActivity : Activity() {
 
     /* ------------------------------------------------------------ 推荐首页 */
 
+    private fun selectRecommend(type: String, tag: String, focusTag: Boolean = false) {
+        mediaType = type
+        recommendTag = tag
+        recommendItems = emptyList()
+        recommendPage = 0
+        recommendSelection = 0
+        noMoreRecommend = false
+        showRecommend(focusTag)
+    }
+
+    private fun recommendHeading(ranking: HomeRanking?): String = when (ranking) {
+        HomeRanking.MOVIE_WEEKLY -> "电影周榜  ·  豆瓣"
+        HomeRanking.TV_POPULAR -> "热门剧榜  ·  百度"
+        null -> when (mediaType) {
+            "tv" -> "剧集  ·  $recommendTag"
+            "show" -> "综艺推荐"
+            else -> "电影  ·  $recommendTag"
+        }
+    }
+
     private fun showRecommend(focusTag: Boolean = false) {
         if (currentScreen == "results") job?.cancel()
         stopRecommendLoading()
@@ -2895,77 +2895,72 @@ class MainActivity : Activity() {
         currentScreen = "recommend"
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(48), dp(24), dp(48), dp(20))
+            setPadding(dp(32), dp(18), dp(32), dp(12))
         }
         val brandBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        brandBar.addView(
-            brandRow(),
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-        )
-        updateCapsule()?.let { brandBar.addView(it) }
-        col.addView(brandBar)
-        recommendTitle = titleText(
-            (when {
-                recommendTag == "综艺" -> "豆瓣 · 综艺"
-                mediaType == "tv" -> "豆瓣 · " + recommendTag + " · 剧集"
-                else -> "豆瓣 · " + recommendTag + " · 电影"
-            }) +
-                "  ·  第 ${recommendPage + 1} 批，共 ${recommendItems.size} 条",
-            17f,
-        )
-        col.addView(recommendTitle)
-
+        val ranking = HomeRanking.entries.firstOrNull { it.label == recommendTag }
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val hiddenIds = prefs.homeBarHidden()
+        var activeMedia: Button? = null
         for (id in prefs.homeBarOrder()) {
             if (hiddenIds.contains(id)) continue
-            when (id) {
-                "movie" -> bar.addView(button("电影") { mediaType = "movie"; recommendTag = "热门"; recommendItems = emptyList(); recommendPage = 0; noMoreRecommend = false; isLoadingMore = false; showRecommend() })
-                "tv" -> bar.addView(button("剧集") { mediaType = "tv"; recommendTag = "热门"; recommendItems = emptyList(); recommendPage = 0; noMoreRecommend = false; isLoadingMore = false; showRecommend() })
-                "show" -> bar.addView(button("综艺") { mediaType = "show"; recommendTag = "综艺"; recommendItems = emptyList(); recommendPage = 0; noMoreRecommend = false; isLoadingMore = false; showRecommend() })
-                "search" -> bar.addView(button("搜索") { showHome() })
-                "history" -> bar.addView(button("继续") { showHistoryCards() })
-                "sources" -> bar.addView(button("片源") { showSources() })
-                "setup" -> bar.addView(button("设置") { showSetup() })
+            val control = when (id) {
+                "movie", "tv", "show" -> button(HomeBar.label(id), primary = id == mediaType && ranking == null) {
+                    selectRecommend(id, if (id == "show") "综艺" else "热门")
+                }
+                "search" -> button("搜索") { showHome() }
+                "history" -> button("继续") { showHistoryCards() }
+                "sources" -> button("片源") { showSources() }
+                "setup" -> button("设置") { showSetup() }
+                else -> continue
             }
+            bar.addView(control)
+            if (id == mediaType) activeMedia = control
         }
-        col.addView(hScroll(bar))
+        updateCapsule()?.let { bar.addView(it) }
+        brandBar.addView(brandRow())
+        brandBar.addView(hScroll(bar), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        col.addView(brandBar)
         homeBar = bar
 
-        // 标签与 LibreTV v2.21.1 的 douban-section.tsx 保持一致。
+        // Keep the existing filters and use the same poster grid for both finite rankings.
         val tags = when (mediaType) {
             "movie" -> listOf("热门", "最新", "经典", "豆瓣高分", "冷门佳片", "华语", "欧美", "韩国", "日本", "动画")
             "tv" -> listOf("热门", "美剧", "英剧", "韩剧", "日剧", "国产剧", "港剧", "日本动画", "综艺", "纪录片")
-            else -> emptyList()
+            else -> listOf("综艺")
         }
         val tagBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         var selectedTag: Button? = null
-        for (tag in tags) {
-            val tagButton = button(tag, primary = tag == recommendTag) {
-                if (tag == recommendTag) return@button
-                recommendTag = tag
-                recommendItems = emptyList()
-                recommendPage = 0
-                noMoreRecommend = false
-                isLoadingMore = false
-                showRecommend(focusTag = true)
+        val choices = tags.take(1) + HomeRanking.entries.map { it.label } + tags.drop(1)
+        for (tag in choices) {
+            val tagButton = button(if (mediaType == "show" && tag == "综艺") "全部" else tag, primary = tag == recommendTag) {
+                if (tag != recommendTag) selectRecommend(mediaType, tag, focusTag = true)
+                else if (recommendItems.isEmpty()) loadRecommend()
             }
             tagBar.addView(tagButton)
             if (tag == recommendTag) selectedTag = tagButton
         }
-        if (tags.isNotEmpty()) col.addView(hScroll(tagBar))
+        col.addView(hScroll(tagBar))
+        recommendTitle = titleText(recommendHeading(ranking), 18f).apply {
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(4), dp(8), 0, 0)
+        }
+        col.addView(recommendTitle)
 
+        val columns = 6
+        val gap = 10
+        val posterWidth = (resources.displayMetrics.widthPixels - dp(64 + gap * (columns - 1))) / columns - dp(8)
         val grid = newGrid().apply {
-            numColumns = 6
-            horizontalSpacing = dp(14)
-            verticalSpacing = dp(14)
-            setPadding(0, dp(12), 0, 0)
+            numColumns = columns
+            horizontalSpacing = dp(gap)
+            verticalSpacing = dp(gap)
+            setPadding(0, dp(6), 0, 0)
         }
         recommendGrid = grid
-        grid.adapter = recommendAdapter()
+        grid.adapter = recommendAdapter(posterWidth * 3 / 2)
             grid.setOnScrollListener(object : android.widget.AbsListView.OnScrollListener {
                 override fun onScrollStateChanged(view: android.widget.AbsListView, state: Int) = Unit
                 override fun onScroll(
@@ -2983,7 +2978,7 @@ class MainActivity : Activity() {
                     if (code == android.view.KeyEvent.KEYCODE_DPAD_DOWN &&
                         ev.action == android.view.KeyEvent.ACTION_DOWN
                     ) {
-                        if (selectedTag != null) selectedTag.requestFocus() else grid.requestFocus()
+                        (selectedTag ?: tagBar.getChildAt(0)).requestFocus()
                         true
                     } else {
                         false
@@ -3002,16 +2997,22 @@ class MainActivity : Activity() {
                             if (ti + 1 < tagBar.childCount) tagBar.getChildAt(ti + 1).requestFocus()
                             true
                         }
-                        KeyEvent.KEYCODE_DPAD_UP -> { bar.getChildAt(0)?.requestFocus(); true }
+                        KeyEvent.KEYCODE_DPAD_UP -> { (activeMedia ?: bar.getChildAt(0))?.requestFocus(); true }
                         KeyEvent.KEYCODE_DPAD_DOWN -> { grid.requestFocus(); true }
                         else -> false
                     }
                 }
             }
-            // 海报第一行向上回到当前分类，综艺页仍回到顶部导航。
+            // The first poster row returns to the active filter.
             grid.setOnKeyListener { _, code, ev ->
+                if (ev.action == KeyEvent.ACTION_DOWN && recommendItems.isEmpty() &&
+                    (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER)
+                ) {
+                    loadRecommend()
+                    return@setOnKeyListener true
+                }
                 if (code == KeyEvent.KEYCODE_DPAD_DOWN && ev.action == KeyEvent.ACTION_DOWN &&
-                    grid.selectedItemPosition >= recommendItems.size - grid.numColumns &&
+                    grid.selectedItemPosition >= (recommendItems.lastIndex / grid.numColumns) * grid.numColumns &&
                     recommendFailedPage == recommendPage + 1
                 ) {
                     recommendFailedPage = -1
@@ -3022,27 +3023,32 @@ class MainActivity : Activity() {
                     ev.action == android.view.KeyEvent.ACTION_DOWN &&
                     grid.selectedItemPosition < grid.numColumns
                 ) {
-                    if (selectedTag != null) selectedTag.requestFocus()
-                    else if (bar.childCount > 0) bar.getChildAt(0).requestFocus()
+                    (selectedTag ?: tagBar.getChildAt(0)).requestFocus()
                     true
                 } else {
                     false
                 }
             }
         grid.setOnItemClickListener { _, _, pos, _ ->
-            recommendItems.getOrNull(pos)?.let { doSearch(it.title) }
+            recommendItems.getOrNull(pos)?.let {
+                recommendSelection = pos
+                doSearch(it.title)
+            }
         }
         col.addView(grid, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         setScreen(col)
-        if (focusTag) selectedTag?.requestFocus() else grid.requestFocus()
-        if (recommendItems.isEmpty()) loadRecommend(focusTag = focusTag)
+        if (focusTag || recommendItems.isEmpty()) (selectedTag ?: tagBar.getChildAt(0)).requestFocus()
+        else {
+            grid.requestFocus()
+            grid.setSelection(recommendSelection)
+        }
+        if (recommendItems.isEmpty()) loadRecommend(focusGrid = !focusTag)
         else grid.post { prepareRecommend() }
     }
 
     private fun stopRecommendLoading() {
-        if (recommendJob != null) dismissProgress()
         recommendJob?.cancel()
         recommendJob = null
         isLoadingMore = false
@@ -3062,30 +3068,32 @@ class MainActivity : Activity() {
         ) loadRecommend(true)
     }
 
-    private fun loadRecommend(more: Boolean = false, focusTag: Boolean = false) {
+    private fun loadRecommend(more: Boolean = false, focusGrid: Boolean = false) {
         if (isLoadingMore || (more && noMoreRecommend)) return
         isLoadingMore = true
         val page = if (more) recommendPage + 1 else 0
         val type = mediaType
         val tag = recommendTag
-        if (!more) progress("正在加载推荐…")
+        val ranking = HomeRanking.entries.firstOrNull { it.label == tag }
+        val heading = recommendHeading(ranking)
+        val initialFocus = if (focusGrid) currentFocus else null
+        if (!more) recommendTitle?.text = "$heading  ·  加载中…"
         recommendJob = scope.launch {
             try {
-                val items = runInterruptible(Dispatchers.IO) { api.douban(type, tag, page * 48, 48) }
-                if (!more) dismissProgress()
+                val items = runInterruptible(Dispatchers.IO) {
+                    if (ranking == null) api.douban(type, tag, page * 48, 48) else api.hotList(ranking)
+                }
                 if (items.isEmpty()) {
                     noMoreRecommend = true
-                    if (!more) toast("当前分类暂无推荐，可切换分类或搜索")
+                    if (!more) recommendTitle?.text = "$heading  ·  暂无内容"
                 } else {
                     recommendItems = if (more) recommendItems + items else items
                     recommendPage = page
-                    noMoreRecommend = false
+                    noMoreRecommend = ranking != null
                     recommendFailedPage = -1
-                    recommendTitle?.text = (if (tag == "综艺") "豆瓣 · 综艺"
-                        else "豆瓣 · $tag · ${if (type == "tv") "剧集" else "电影"}") +
-                        "  ·  第 ${page + 1} 批，共 ${recommendItems.size} 条"
+                    recommendTitle?.text = heading
                     (recommendGrid?.adapter as? BaseAdapter)?.notifyDataSetChanged()
-                    if (!more && !focusTag) recommendGrid?.requestFocus()
+                    if (initialFocus != null && currentFocus === initialFocus) recommendGrid?.requestFocus()
                 }
             } catch (error: CancellationException) {
                 throw error
@@ -3094,11 +3102,7 @@ class MainActivity : Activity() {
                     recommendFailedPage = page
                     toast("下一批暂未加载，列表末尾按下键重试")
                 } else {
-                    dismissProgress()
-                    AlertDialog.Builder(this@MainActivity).setTitle("推荐加载失败")
-                        .setMessage(describe(error))
-                        .setPositiveButton("重试") { _, _ -> loadRecommend(false, focusTag) }
-                        .setNegativeButton("去搜索") { _, _ -> showHome() }.show()
+                    recommendTitle?.text = "$heading  ·  加载失败，确认重试"
                 }
             } finally {
                 if (recommendJob === coroutineContext.job) {
@@ -3111,7 +3115,7 @@ class MainActivity : Activity() {
     }
 
     /** 海报网格：ImageView 复用时要校验 URL，否则快速滚动会串图。 */
-    private fun recommendAdapter(): BaseAdapter = object : BaseAdapter() {
+    private fun recommendAdapter(posterHeight: Int): BaseAdapter = object : BaseAdapter() {
         override fun getCount() = recommendItems.size
         override fun getItem(position: Int): Any = recommendItems[position]
         override fun getItemId(position: Int) = position.toLong()
@@ -3119,21 +3123,26 @@ class MainActivity : Activity() {
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
             val cell = (convertView as? LinearLayout) ?: LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(6), dp(6), dp(6), dp(6))
+                setPadding(dp(4), dp(4), dp(4), dp(5))
                 addView(
                     ImageView(this@MainActivity).apply {
                         layoutParams = LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, dp(210))
+                            ViewGroup.LayoutParams.MATCH_PARENT, posterHeight)
                         scaleType = ImageView.ScaleType.CENTER_CROP
-                        setBackgroundColor(Color.parseColor("#1a2233"))
+                        background = GradientDrawable().apply {
+                            setColor(PANEL)
+                            cornerRadius = dp(8).toFloat()
+                        }
+                        clipToOutline = true
                     },
                 )
                 addView(
                     TextView(this@MainActivity).apply {
-                        setTextSize(13f)
-                        setTextColor(Color.parseColor("#e5e7eb"))
+                        setTextSize(14f)
+                        setTextColor(TEXT_COLOR)
                         maxLines = 2
-                        setPadding(0, dp(6), 0, 0)
+                        ellipsize = TextUtils.TruncateAt.END
+                        setPadding(dp(3), dp(6), dp(3), 0)
                     },
                 )
             }
@@ -3146,7 +3155,6 @@ class MainActivity : Activity() {
             imageLoader.load(item.cover, dp(180), dp(260)) { bmp ->
                 if (img.tag == item.cover) img.setImageBitmap(bmp)
             }
-            cell.setOnClickListener { doSearch(item.title) }
             return cell
         }
     }
@@ -3165,7 +3173,7 @@ class MainActivity : Activity() {
                 }
                 tv.text = items[position]
                 tv.setOnClickListener { onItem(position) }
-                applyFocusStyle(tv, Color.TRANSPARENT, tv)
+                applyFocusStyle(tv, Color.TRANSPARENT, tv, focusedBg = ACCENT)
                 return tv
             }
         }
