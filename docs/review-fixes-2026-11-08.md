@@ -22,3 +22,20 @@ adb -s <emulator-serial> shell am instrument -w -r -e mode regression -e case re
 新增 case：`review-replay`、`review-favorite-switch`、`review-clear-cache`、`review-sources-back`，四项通过。原有 `tv-navigation`、`tv-favorites-history` 两项回归通过；74 项 JVM 测试通过。构建仍有既有 Gradle 弃用提示，不代表所有编译输出均无警告。
 
 真实遥控器、N5 固件、真实片源和长时间播放不在本轮验收范围内。运行包名、签名配置、已有数据格式及上游正式运行环境保持原有约定。
+
+## 第二轮 P2：清理完成覆盖新页面
+
+复现基线：`6a2f70b1492ee4a9e074da959e5398a159df62a5`。
+
+在测试线程暂时持有 `PlaybackCache` 已有的锁，确认清理后通过顶部导航切到收藏或搜索，再放行真实磁盘清理。原代码的两项测试分别报错 `Cleanup changed favorites to setup`、`Cleanup changed home to setup`：清理完成后无条件刷新设置，覆盖了用户的新页面。
+
+业务代码只修改一行：仅当 `currentScreen == "setup"` 时刷新设置。清理和完成提示仍正常执行。时序控制全部放在测试 APK，没有新增业务状态或测试专用接口。
+
+修复后，在 Android 14 TV 模拟器通过以下回归；缓存清零，片源配置保留：
+
+- `review-clear-cache-favorites`：清理期间转到收藏，完成后保留收藏页。
+- `review-clear-cache-search`：清理期间转到搜索，完成后保留搜索页。
+- `review-clear-cache`：留在设置页，正常完成清理和刷新。
+- `tv-navigation`：顶部图标、返回层级和设置导航正常。
+
+沿用上方构建和测试命令，74 项 JVM 测试通过，主 APK 和测试 APK 构建成功。包名、版本和签名保持一致；本轮只覆盖安装到模拟器，没有操作或部署投影仪。构建仍提示已有的弃用 API 警告。

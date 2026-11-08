@@ -27,7 +27,8 @@ class NativeCmsInstrumentation : Instrumentation() {
             if (options.getString("mode") == "regression") {
                 val caseId = options.getString("case").orEmpty()
                 val result = when (caseId) {
-                    "review-replay", "review-favorite-switch", "review-clear-cache", "review-sources-back" ->
+                    "review-replay", "review-favorite-switch", "review-clear-cache", "review-clear-cache-favorites",
+                    "review-clear-cache-search", "review-sources-back" ->
                         ReviewFixesProbe(this).run(caseId)
                     "tv-dialogs" -> TvUiProbe(this).dialogs()
                     "tv-navigation" -> TvUiProbe(this).navigation()

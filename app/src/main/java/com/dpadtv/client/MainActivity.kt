@@ -1349,7 +1349,7 @@ class MainActivity : Activity() {
                     prefs.clearSearchHistory()
                     prefs.clearAllProgress()
                     toast("已清理（图片 $n 张、播放缓存、历史 $hist 条、搜索 $search 条、进度 $progress 条）")
-                    showSetup()
+                    if (currentScreen == "setup") showSetup()
                 }
             }
             .setNegativeButton("取消", null)

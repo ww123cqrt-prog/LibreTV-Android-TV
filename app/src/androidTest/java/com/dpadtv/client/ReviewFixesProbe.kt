@@ -11,6 +11,9 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.Job
 import org.json.JSONObject
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 /** Review regressions use disposable emulator data and generated local media only. */
 class ReviewFixesProbe(private val instrumentation: Instrumentation) {
@@ -108,7 +111,8 @@ class ReviewFixesProbe(private val instrumentation: Instrumentation) {
                         (field(target, "currentSource") as SearchItem).sourceName == "B" }
                     check(prefs.isFavorite("审查测试剧", "2026") && !prefs.isFavorite("审查测试剧", "2027"))
                 }
-                "review-clear-cache", "review-sources-back" -> {
+                "review-clear-cache", "review-clear-cache-favorites", "review-clear-cache-search", "review-sources-back" -> {
+                    prefs.saveHomeBarHidden(emptySet())
                     val target = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
                     activity = target
@@ -116,7 +120,7 @@ class ReviewFixesProbe(private val instrumentation: Instrumentation) {
                         (field(target, "recommendJob") as? Job)?.cancel()
                         invoke(target, "showSetup")
                     }
-                    if (caseId == "review-clear-cache") {
+                    if (caseId.startsWith("review-clear-cache")) {
                         val cache = PlaybackCache.get(context)
                         val key = "review-cache-${System.nanoTime()}"
                         val hole = cache.startReadWrite(key, 0, 1024)
@@ -131,9 +135,44 @@ class ReviewFixesProbe(private val instrumentation: Instrumentation) {
                             WindowInspector.getGlobalWindowViews().any { it.hasWindowFocus() &&
                                 it.findViewById<View>(android.R.id.button1) != null }
                         }
+                        val destination = when (caseId) {
+                            "review-clear-cache-favorites" -> "favorites"
+                            "review-clear-cache-search" -> "search"
+                            else -> null
+                        }
+                        val expectedScreen = if (destination == "search") "home" else destination ?: "setup"
+                        val progressKey = "review-cleanup-completion"
+                        prefs.saveProgress(progressKey, 9_000)
+                        val held = CountDownLatch(1)
+                        val release = CountDownLatch(1)
+                        // Delay the real IO cleanup at its existing monitor; the UI remains free to navigate.
+                        val blocker = destination?.let {
+                            thread(name = "review-cache-blocker") {
+                                synchronized(PlaybackCache) {
+                                    held.countDown()
+                                    release.await(12, TimeUnit.SECONDS)
+                                }
+                            }
+                        }
+                        try {
+                            if (blocker != null) check(held.await(3, TimeUnit.SECONDS)) { "Cache monitor was not held" }
+                            onMain {
+                                val window = WindowInspector.getGlobalWindowViews().last { it.hasWindowFocus() }
+                                window.findViewById<View>(android.R.id.button1).performClick()
+                                if (destination != null) {
+                                    target.window.decorView.findViewWithTag<View>(destination).performClick()
+                                    check(field(target, "currentScreen") == expectedScreen) { "Navigation did not reach $expectedScreen" }
+                                    check(prefs.progressOf(progressKey) == 9_000L) { "Cleanup was not delayed" }
+                                }
+                            }
+                        } finally {
+                            release.countDown()
+                            blocker?.join(3_000)
+                        }
+                        await("Cleanup did not complete") { prefs.progressOf(progressKey) == 0L }
                         onMain {
-                            val window = WindowInspector.getGlobalWindowViews().last { it.hasWindowFocus() }
-                            window.findViewById<View>(android.R.id.button1).performClick()
+                            val screen = field(target, "currentScreen")
+                            check(screen == expectedScreen) { "Cleanup changed $expectedScreen to $screen" }
                         }
                         await("Playback cache was not cleared") { PlaybackCache.get(context).cacheSpace == 0L }
                         check(prefs.sources() == saved.sources) { "Clearing cache changed source settings" }
