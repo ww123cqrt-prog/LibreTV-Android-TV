@@ -1342,12 +1342,15 @@ class MainActivity : Activity() {
             .setTitle("清理缓存")
             .setMessage(msg)
             .setPositiveButton("清理") { _, _ ->
-                val n = imageLoader.clearCache()
-                prefs.clearHistory()
-                prefs.clearSearchHistory()
-                prefs.clearAllProgress()
-                toast("已清理（图片 $n 张、历史 $hist 条、搜索 $search 条、进度 $progress 条）")
-                showSetup()
+                scope.launch {
+                    val n = imageLoader.clearCache()
+                    withContext(Dispatchers.IO) { PlaybackCache.clear(this@MainActivity) }
+                    prefs.clearHistory()
+                    prefs.clearSearchHistory()
+                    prefs.clearAllProgress()
+                    toast("已清理（图片 $n 张、播放缓存、历史 $hist 条、搜索 $search 条、进度 $progress 条）")
+                    showSetup()
+                }
             }
             .setNegativeButton("取消", null)
             .show()
@@ -1555,7 +1558,9 @@ class MainActivity : Activity() {
     /** 片源管理：列表为主，导入走独立页面；每条可编辑/停用/上移下移/测试/删除 */
     private fun showSources(fromNavigation: Boolean = false) {
         // 记录来源：从设置页进来的，返回时回设置；从首页进来的回首页
-        sourcesOrigin = if (!fromNavigation && currentScreen == "setup") "setup" else "home"
+        if (fromNavigation || currentScreen !in setOf("sources", "files", "qradd", "input", "manualadd", "addsource", "import")) {
+            sourcesOrigin = if (!fromNavigation && currentScreen == "setup") "setup" else "home"
+        }
         currentScreen = "sources"
         val sources = prefs.sources()
         val enabledCount = sources.count { it.enabled }

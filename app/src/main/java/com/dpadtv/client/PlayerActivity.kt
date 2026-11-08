@@ -334,6 +334,7 @@ class PlayerActivity : Activity() {
             showActions()
         })
         actionBar.addView(actionButton("重播") {
+            prefs.clearProgress(currentUrl())
             player?.seekTo(currentIndex, 0L)
             player?.play()
             showActions()
@@ -515,6 +516,7 @@ class PlayerActivity : Activity() {
                         recoveryOfferedForUrl = ""
                         showResolution(exo.videoSize)
                         if (sourceBackup != null) {
+                            resolveFavoriteYear(currentSource?.year.orEmpty())
                             historyNeedsPlaylist = false
                             updateEpisodeAction()
                             sourceBackup = null
@@ -556,17 +558,7 @@ class PlayerActivity : Activity() {
             val alreadyEnded = p.playbackState == Player.STATE_ENDED
             historyNeedsPlaylist = false
             currentSource = source
-            if (favoriteYear.isEmpty() && source.year.isNotEmpty()) {
-                val earlyFavorite = prefs.favorites().firstOrNull { it.title == searchTitle && it.year.isEmpty() }
-                favoriteYear = source.year
-                if (earlyFavorite != null) {
-                    prefs.removeFavorite(earlyFavorite)
-                    if (!prefs.isFavorite(searchTitle, favoriteYear)) {
-                        prefs.toggleFavorite(earlyFavorite.copy(year = favoriteYear))
-                    }
-                }
-                updateFavoriteAction()
-            }
+            resolveFavoriteYear(source.year)
             seriesTitle = title
             urls = episodes
             historyEpisodeIndex = 0
@@ -994,6 +986,17 @@ class PlayerActivity : Activity() {
                     else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
                 }
         }
+    }
+
+    private fun resolveFavoriteYear(year: String) {
+        if (favoriteYear.isNotEmpty() || year.isEmpty()) return
+        val earlyFavorite = prefs.favorites().firstOrNull { it.title == searchTitle && it.year.isEmpty() }
+        favoriteYear = year
+        if (earlyFavorite != null) {
+            prefs.removeFavorite(earlyFavorite)
+            if (!prefs.isFavorite(searchTitle, year)) prefs.toggleFavorite(earlyFavorite.copy(year = year))
+        }
+        updateFavoriteAction()
     }
 
     private fun updateFavoriteAction() {
